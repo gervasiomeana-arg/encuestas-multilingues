@@ -19,7 +19,8 @@ import {
 } from 'lucide-react';
 import { Survey, SurveyQuestion, QuestionType, COUNTRIES, AVAILABLE_LANGUAGES, TranslationData } from '../types';
 import { saveSurvey } from '../firebaseService';
-import { validQuestions } from '../utils/apiValidation';
+import { validQuestions, validSurveyDraft } from '../utils/apiValidation';
+import { translationCoverage } from '../utils/surveyValidation';
 import { uploadAndParseSurveyFile, translateSurveyWithAI } from '../utils/api';
 
 interface AdminSurveyCreatorProps {
@@ -64,6 +65,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
 
   // Save survey status
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -213,6 +215,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   // Save the constructed survey draft in Firestore
   const handleSaveSurvey = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (saveInFlight.current) return;
     setErrorMessage(null);
 
     // Validation
@@ -243,7 +246,13 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
       setErrorMessage('Revisa los IDs, tipos y opciones: hay preguntas inválidas o repetidas.');
       return;
     }
+    if (!validSurveyDraft({ title, description, questions })) {
+      setErrorMessage('Revisa el título y la descripción: superan la longitud permitida.');
+      return;
+    }
+    saveInFlight.current = true;
     setSaving(true);
+    let saved = false;
 
     try {
       const surveyId = `survey_${crypto.randomUUID()}`;
@@ -267,15 +276,15 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
           activeCountryInfo.nativeLanguage.code, 
           activeCountryInfo.nativeLanguage.name
         );
-        if (translateResult.success && translateResult.translation) {
+        if (translateResult.success && translateResult.translation && translationCoverage(surveyData, translateResult.translation).complete) {
           surveyData.translations[activeCountryInfo.nativeLanguage.code] = translateResult.translation;
         } else {
-          console.warn("Auto-translation issue:", translateResult.error);
-          // Don't crash entirely, save draft anyway but alert admin
+          throw new Error('No se guardó la encuesta porque no se completó la traducción solicitada. Reintenta o desactiva la traducción automática para guardar solo el original.');
         }
       }
 
       await saveSurvey(surveyData);
+      saved = true;
       setSaveSuccess(true);
       
       // Reset variables
@@ -284,6 +293,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         setDescription('');
         setQuestions([]);
         setSaveSuccess(false);
+        saveInFlight.current = false;
         if (onClearEdit) onClearEdit();
         onSurveyCreated(); // Notify parent of update
       }, 2000);
@@ -291,6 +301,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
     } catch (err: any) {
       setErrorMessage(err.message || "No se pudo guardar la encuesta.");
     } finally {
+      if (!saved) saveInFlight.current = false;
       setSaving(false);
     }
   };

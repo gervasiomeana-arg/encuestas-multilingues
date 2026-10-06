@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -37,7 +37,7 @@ import {
 } from 'lucide-react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, SurveyQuestion } from '../types';
 import { saveMultipleResponses } from '../firebaseService';
-import { ratingAverage, ratingScore } from '../utils/dataProtection';
+import { ratingAverage, ratingScore, prepareResponseImport } from '../utils/dataProtection';
 import { ratingDistribution, surveyReportCSV, resolveResponseSurvey } from '../utils/reportData';
 import { 
   normalizeAnswerToSpanish, 
@@ -93,6 +93,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importJsonText, setImportJsonText] = useState<string>('');
   const [importLoading, setImportLoading] = useState<boolean>(false);
+  const importInFlight = useRef(false);
   const [importSuccessAlert, setImportSuccessAlert] = useState<string>('');
   const [importErrorAlert, setImportErrorAlert] = useState<string>('');
 
@@ -304,31 +305,17 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   // ---------------------------------------------------------------------------------
 
   const handleImportJson = async () => {
+    if (importInFlight.current) return;
     if (!importJsonText.trim()) {
       setImportErrorAlert('Por favor pega el JSON o texto con las respuestas.');
       return;
     }
+    importInFlight.current = true;
     setImportLoading(true);
     setImportErrorAlert('');
     setImportSuccessAlert('');
     try {
-      let parsed = JSON.parse(importJsonText.trim());
-      if (parsed?.format === 'survey-backup' && Array.isArray(parsed.responses)) {
-        // Imports only add responses. Questionnaire definitions are never restored or changed.
-        parsed = parsed.responses;
-      }
-      if (!Array.isArray(parsed)) {
-        parsed = [parsed];
-      }
-      const formatted: SurveyResponse[] = parsed.map((item: any, idx: number) => ({
-        id: item.id || `resp_import_${crypto.randomUUID()}`,
-        surveyId: item.surveyId || currentSurvey?.id || 'survey_mauritania_dos',
-        userName: item.userName || item.nombre || `Participante ${idx + 1}`,
-        userLanguage: item.userLanguage || item.idioma || 'es',
-        userCountry: item.userCountry || currentSurvey?.targetCountry || 'Mauritania',
-        answers: item.answers || item.respuestas || item,
-        submittedAt: item.submittedAt || item.fecha || new Date().toISOString()
-      }));
+      const formatted = prepareResponseImport(JSON.parse(importJsonText.trim()));
 
       const count = await saveMultipleResponses(formatted);
       setImportSuccessAlert(`¡Se han importado exitosamente ${count} respuestas!`);
@@ -343,6 +330,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     } catch (err: any) {
       setImportErrorAlert('No se pudo importar. Los registros existentes se conservaron: ' + (err.message || String(err)));
     } finally {
+      importInFlight.current = false;
       setImportLoading(false);
     }
   };
@@ -1765,7 +1753,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                 <textarea
                   value={importJsonText}
                   onChange={(e) => setImportJsonText(e.target.value)}
-                  placeholder={`Pega aquí el JSON de respuestas (ejemplo: [{"surveyId": "survey_mauritania_dos", "answers": {...}}])`}
+                  placeholder={`Pega un respaldo o registros con id, surveyId, userName, userLanguage, answers y submittedAt. No se completan campos faltantes automáticamente.`}
                   rows={4}
                   className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
                 />

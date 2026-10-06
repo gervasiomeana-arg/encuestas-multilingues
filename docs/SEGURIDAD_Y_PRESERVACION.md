@@ -161,3 +161,19 @@ semántica del formulario. No se verificó ni activó producción.
   cuando no existe la definición exacta; si existe, tiene prioridad. Los IDs
   guardados no cambian. La unión histórica usada por los gráficos se conserva.
 - El JSON sigue siendo el respaldo íntegro, sin normalización de respuestas.
+
+## Creación e importación explícitas
+
+- Un archivo de respuestas debe incluir ID de registro, ID de encuesta, fecha,
+  nombre, idioma y mapa de respuestas. Se reconocen los campos anteriores
+  `nombre`, `idioma`, `respuestas` y `fecha`, sin cambiar sus valores. El importador
+  no genera IDs ni fechas, no infiere país y no asocia registros a la encuesta
+  seleccionada cuando el archivo no lo especifica.
+- Se rechazan lotes vacíos, respuestas sin contenido y metadatos incompatibles
+  con las reglas antes de enviar la transacción. Los IDs existentes siguen
+  protegidos contra sobrescritura; una reimportación no crea nuevas copias por azar.
+- Crear una encuesta con traducción automática exige que esta termine y cubra
+  todas las preguntas. Si falla, se conserva el borrador y no se guarda una
+  encuesta sin la traducción solicitada. El administrador puede reintentar o
+  desactivar explícitamente la traducción para guardar solo el original.
+- Clics repetidos durante creación o importación quedan bloqueados en la sesión.

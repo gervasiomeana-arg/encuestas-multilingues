@@ -9,13 +9,40 @@ export function validateResponseBatch(responses: SurveyResponse[]) {
     if (!response || typeof response.id !== 'string' || !response.id || response.id.includes('/') ||
         typeof response.surveyId !== 'string' || !response.surveyId || response.surveyId.includes('/') ||
         !response.answers || typeof response.answers !== 'object' || Array.isArray(response.answers) ||
-        typeof response.userName !== 'string' || typeof response.userLanguage !== 'string' ||
+        Object.keys(response.answers).length === 0 || Object.keys(response.answers).length > 250 ||
+        typeof response.userName !== 'string' || response.userName.length > 200 ||
+        typeof response.userLanguage !== 'string' || response.userLanguage.length > 20 ||
+        (response.userCountry !== undefined && typeof response.userCountry !== 'string') ||
         typeof response.submittedAt !== 'string' || !Number.isFinite(Date.parse(response.submittedAt))) {
       throw new Error('Una respuesta tiene un formato inválido. No se importó ningún registro.');
     }
     if (ids.has(response.id)) throw new Error('Hay IDs repetidos en el archivo. No se importó ningún registro.');
     ids.add(response.id);
   }
+}
+
+// Import only explicit records. Never infer survey, timestamp or answers from UI state.
+export function prepareResponseImport(input: unknown): SurveyResponse[] {
+  let source: unknown = input;
+  if (source && typeof source === 'object' && 'format' in source && source.format === 'survey-backup') {
+    if (!('responses' in source) || !Array.isArray(source.responses)) throw new Error('El respaldo no contiene una lista de respuestas válida.');
+    source = source.responses;
+  }
+  const records = Array.isArray(source) ? source : [source];
+  const responses = records.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('El archivo contiene un registro inválido.');
+    return {
+      id: item.id,
+      surveyId: item.surveyId,
+      userName: item.userName ?? item.nombre,
+      userLanguage: item.userLanguage ?? item.idioma,
+      ...(item.userCountry !== undefined ? { userCountry: item.userCountry } : {}),
+      answers: item.answers ?? item.respuestas,
+      submittedAt: item.submittedAt ?? item.fecha
+    } as SurveyResponse;
+  });
+  validateResponseBatch(responses);
+  return responses;
 }
 
 export function ratingScore(value: unknown): number | null {
