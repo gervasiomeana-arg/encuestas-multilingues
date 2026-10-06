@@ -18,7 +18,7 @@ import {
   ArrowDown
 } from 'lucide-react';
 import { Survey, SurveyQuestion, QuestionType, COUNTRIES, AVAILABLE_LANGUAGES, TranslationData } from '../types';
-import { saveSurvey, getAllSurveys, deleteSurvey } from '../firebaseService';
+import { saveSurvey } from '../firebaseService';
 import { uploadAndParseSurveyFile, translateSurveyWithAI } from '../utils/api';
 
 interface AdminSurveyCreatorProps {
@@ -205,7 +205,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   };
 
   // Save the constructed survey draft in Firestore
-  const handleSaveSurvey = async (e: React.FormEvent, forceNewId?: boolean) => {
+  const handleSaveSurvey = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
 
@@ -236,8 +236,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
     setSaving(true);
 
     try {
-      const isUpdating = initialSurvey && !forceNewId;
-      const surveyId = isUpdating ? initialSurvey.id : `survey_${Date.now()}`;
+      const surveyId = `survey_${crypto.randomUUID()}`;
       
       const surveyData: Survey = {
         id: surveyId,
@@ -246,8 +245,8 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         questions,
         targetCountry,
         targetLanguage: activeCountryInfo.nativeLanguage.code,
-        translations: isUpdating ? { ...initialSurvey.translations } : {},
-        createdAt: isUpdating ? initialSurvey.createdAt : new Date().toISOString(),
+        translations: {},
+        createdAt: new Date().toISOString(),
         createdBy: "administrador"
       };
 
@@ -289,54 +288,9 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   return (
     <div className="space-y-6" id="survey-creator-workflow">
       
-      {/* QUICK ACTIONS BANNER */}
-      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-5 rounded-3xl text-white shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="bg-white/15 text-emerald-100 text-[9px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full border border-white/20 font-mono">
-              Acceso Rápido Oficial
-            </span>
-          </div>
-          <h4 className="text-sm font-bold font-display uppercase tracking-wider mt-1">Cargar Encuesta Mauritania Perfecta (Verbatim)</h4>
-          <p className="text-[11px] text-emerald-100/90 max-w-xl">
-            Corrige y reestablece al instante la encuesta 100% fiel al documento original de Word de 42 preguntas distribuidas en los 8 Bloques, con traducciones incluidas.
-          </p>
-        </div>
-        <button
-          onClick={async () => {
-            if (confirm("Se eliminará la versión actual de la Encuesta de Mauritania y se reemplazará por la versión 100% exacta del archivo Word. ¿Deseas continuar?")) {
-              setSaving(true);
-              try {
-                const { MAURITANIA_SURVEY } = await import('../utils/mauritaniaDefaultSurvey');
-                const allSurveys = await getAllSurveys();
-                const mauritaniaSurveys = allSurveys.filter(s => s.targetCountry === 'Mauritania' || s.title.includes('MAURITANIA'));
-                for (const oldSurvey of mauritaniaSurveys) {
-                  await deleteSurvey(oldSurvey.id);
-                }
-                await saveSurvey(MAURITANIA_SURVEY);
-                setSaveSuccess(true);
-                setTimeout(() => {
-                  setSaveSuccess(false);
-                  onSurveyCreated();
-                }, 1500);
-              } catch (e: any) {
-                setErrorMessage(e.message || "Error al restablecer la encuesta.");
-              } finally {
-                setSaving(false);
-              }
-            }
-          }}
-          disabled={saving}
-          className="bg-white hover:bg-emerald-50 text-emerald-800 text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm shrink-0 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-        >
-          {saving ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
-          ) : (
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-          )}
-          <span>Cargar Encuesta Oficial</span>
-        </button>
-      </div>
+      {initialSurvey && <p className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800">
+        La encuesta original está protegida. Los cambios se guardarán en una copia nueva, sin alterar sus respuestas.
+      </p>}
 
       {/* SECTION 1: DOCUMENT PARSER CHANGER UPLOADER */}
       <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
@@ -447,7 +401,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
                 Modo Edición / Duplicación Activo
               </p>
               <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
-                Estás trabajando sobre la encuesta <strong className="font-semibold">"{initialSurvey.title}"</strong> ({initialSurvey.targetCountry}). Puedes modificar las preguntas, cambiar el país de destino (por ejemplo, a Senegal) y elegir guardarla como copia nueva o actualizar la existente.
+                Estás trabajando sobre la encuesta <strong className="font-semibold">"{initialSurvey.title}"</strong> ({initialSurvey.targetCountry}). Puedes modificar las preguntas, cambiar el país de destino (por ejemplo, a Senegal) y guardarla como copia nueva. La original y sus respuestas se conservan.
               </p>
             </div>
             <button
@@ -718,7 +672,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
                 <>
                   <button
                     type="button"
-                    onClick={(e) => handleSaveSurvey(e, true)}
+                    onClick={handleSaveSurvey}
                     disabled={saving}
                     className="bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs px-5 py-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs"
                     title="Crea una encuesta idéntica o editada en otro país con un nuevo enlace, sin alterar la original."
@@ -731,20 +685,6 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
                     <span>Guardar como Copia Nueva (Duplicar)</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={(e) => handleSaveSurvey(e, false)}
-                    disabled={saving}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-5 py-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs shadow-indigo-100"
-                    title="Actualiza los textos o preguntas de la encuesta original manteniendo su ID y enlace activo."
-                  >
-                    {saving ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                    ) : (
-                      <Save className="w-3.5 h-3.5" />
-                    )}
-                    <span>Guardar Cambios (Actualizar Existente)</span>
-                  </button>
                 </>
               ) : (
                 <button

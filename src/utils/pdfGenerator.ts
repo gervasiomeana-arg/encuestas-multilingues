@@ -149,11 +149,11 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
   doc.text('CONSOLIDACIÓN', margin + (colWidth * 2) + 12, currentY + 18);
   doc.setTextColor(16, 185, 129); // emerald
   doc.setFontSize(12);
-  doc.text('100% Español', margin + (colWidth * 2) + 12, currentY + 36);
+  doc.text('Normalización', margin + (colWidth * 2) + 12, currentY + 36);
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
   doc.setFont('helvetica', 'normal');
-  doc.text('árabe/francés unificados', margin + (colWidth * 2) + 12, currentY + 46);
+  doc.text('Texto libre: idioma original', margin + (colWidth * 2) + 12, currentY + 46);
 
   // KPI 4
   doc.setTextColor(100, 116, 139);
@@ -162,11 +162,11 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
   doc.text('BASE DE DATOS', margin + (colWidth * 3) + 12, currentY + 18);
   doc.setTextColor(79, 70, 229); // indigo
   doc.setFontSize(12);
-  doc.text('Auditada', margin + (colWidth * 3) + 12, currentY + 36);
+  doc.text('Registrada', margin + (colWidth * 3) + 12, currentY + 36);
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
   doc.setFont('helvetica', 'normal');
-  doc.text('Firestore Cloud Storage', margin + (colWidth * 3) + 12, currentY + 46);
+  doc.text('Sin verificación de integridad', margin + (colWidth * 3) + 12, currentY + 46);
 
   currentY += 72;
 
@@ -222,7 +222,7 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
       contentInnerHeight = 65;
     } else {
       // Text responses
-      contentInnerHeight = Math.min(65, Math.max(25, answeredCount * 18));
+      contentInnerHeight = 65; // Includes the explicit sample notice.
     }
 
     const totalCardHeight = titleHeight + contentInnerHeight + 24;
@@ -337,10 +337,12 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
       if (sampleAnswers.length === 0) {
         doc.text('Sin respuestas abiertas para esta pregunta en esta localidad.', cardInnerLeft, itemY + 10);
       } else {
+        doc.text('Muestra parcial: hasta 3 respuestas; primera línea. Texto completo en CSV/JSON.', cardInnerLeft, itemY + 8);
+        itemY += 13;
         sampleAnswers.forEach(ans => {
           const cleanAns = `"${String(ans).trim()}"`;
           const splitAns = doc.splitTextToSize(cleanAns, contentWidth - 35);
-          doc.text(splitAns[0] || cleanAns, cardInnerLeft, itemY + 8);
+          doc.text((splitAns[0] || cleanAns) + (splitAns.length > 1 ? '...' : ''), cardInnerLeft, itemY + 8);
           itemY += 13;
         });
       }

@@ -36,8 +36,8 @@ import {
   CheckCircle
 } from 'lucide-react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, SurveyQuestion } from '../types';
-import { deleteSurvey, saveMultipleResponses } from '../firebaseService';
-import { INITIAL_MAURITANIA_RESPONSES } from '../utils/mauritaniaResponsesData';
+import { saveMultipleResponses } from '../firebaseService';
+import { ratingAverage, csvCell } from '../utils/dataProtection';
 import { 
   normalizeAnswerToSpanish, 
   getQuestionTypeLabelES,
@@ -126,27 +126,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
       return normalized === selectedLocality;
     });
   }, [allSurveyResponses, selectedLocality, locationQuestion, currentSurvey]);
-
-  // Handle deletions of surveys
-  const handleDeleteSurvey = async (id: string) => {
-    if (confirm("¿Estás seguro de que deseas eliminar esta encuesta y todo su historial de respuestas? Esta acción es irreversible.")) {
-      try {
-        await deleteSurvey(id);
-        onSurveyDeleted();
-        
-        // Select next available survey
-        const remaining = surveys.filter(s => s.id !== id);
-        if (remaining.length > 0) {
-          setSelectedSurveyId(remaining[0].id);
-        } else {
-          setSelectedSurveyId('');
-        }
-        setSelectedLocality('ALL');
-      } catch (err) {
-        console.error("Error al eliminar la encuesta:", err);
-      }
-    }
-  };
 
   // ---------------------------------------------------------------------------------
   // NORMALIZED CHART MATHEMATICAL PREPARATIONS (ALL ANSWERS CONSOLIDATED IN SPANISH)
@@ -238,21 +217,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
 
   // Calculate Average score specifically for Rating questions
   const calculateRatingAverage = (questionId: string) => {
-    let sum = 0;
-    let count = 0;
-
-    filteredResponses.forEach(res => {
-      const val = res.answers[questionId];
-      if (typeof val === 'number') {
-        sum += val;
-        count++;
-      } else if (typeof val === 'string' && !isNaN(Number(val))) {
-        sum += Number(val);
-        count++;
-      }
-    });
-
-    return count > 0 ? (sum / count).toFixed(1) : 'N/A';
+    return ratingAverage(filteredResponses.map(res => res.answers[questionId]));
   };
 
   // ---------------------------------------------------------------------------------
@@ -319,7 +284,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
       const row = [
         res.id,
         new Date(res.submittedAt).toLocaleString('es-ES'),
-        `"${(res.userName || 'Anónimo').replace(/"/g, '""')}"`,
+        res.userName || 'Anónimo',
         res.userLanguage || 'es',
         res.userCountry || currentSurvey.targetCountry || 'N/A'
       ];
@@ -328,14 +293,14 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
         const raw = res.answers[q.id];
         const norm = normalizeAnswerToSpanish(raw, q, currentSurvey);
         const strVal = Array.isArray(norm) ? norm.join('; ') : String(norm ?? '');
-        row.push(`"${strVal.replace(/"/g, '""')}"`);
+        row.push(strVal);
       });
 
-      return row.join(',');
+      return row.map(csvCell).join(',');
     });
 
     const localitySuffix = selectedLocality === 'ALL' ? 'todas' : selectedLocality.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const csvContent = '\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -344,22 +309,28 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleExportBackupJSON = () => {
-    if (allSurveyResponses.length === 0) {
-      alert("Aún no hay respuestas registradas para respaldar.");
+    if (surveys.length === 0 && responses.length === 0) {
+      alert("Aún no hay información registrada para respaldar.");
       return;
     }
-    const jsonStr = JSON.stringify(allSurveyResponses, null, 2);
+    const jsonStr = JSON.stringify({
+      format: 'survey-backup', version: 1, exportedAt: new Date().toISOString(),
+      counts: { surveys: surveys.length, responses: responses.length },
+      surveys, responses
+    }, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `respaldo_completo_${currentSurvey?.id || 'encuesta'}_${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `respaldo_encuestas_y_respuestas_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDownloadSuccessToast('¡Copia de seguridad descargada con éxito!');
     setTimeout(() => setDownloadSuccessToast(''), 4000);
   };
@@ -367,27 +338,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   // ---------------------------------------------------------------------------------
   // IMPORT & INCORPORATE RESPONSES HANDLERS
   // ---------------------------------------------------------------------------------
-
-  const handleRestoreMauritaniaResponses = async () => {
-    setImportLoading(true);
-    setImportErrorAlert('');
-    setImportSuccessAlert('');
-    try {
-      const count = await saveMultipleResponses(INITIAL_MAURITANIA_RESPONSES);
-      setImportSuccessAlert(`¡Se incorporaron exitosamente ${count} respuestas a la base de datos!`);
-      if (onResponsesUpdated) {
-        onResponsesUpdated();
-      }
-      setTimeout(() => {
-        setIsImportModalOpen(false);
-        setImportSuccessAlert('');
-      }, 1500);
-    } catch (err: any) {
-      setImportErrorAlert('Error al guardar en la base de datos: ' + (err.message || String(err)));
-    } finally {
-      setImportLoading(false);
-    }
-  };
 
   const handleImportJson = async () => {
     if (!importJsonText.trim()) {
@@ -399,11 +349,15 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     setImportSuccessAlert('');
     try {
       let parsed = JSON.parse(importJsonText.trim());
+      if (parsed?.format === 'survey-backup' && Array.isArray(parsed.responses)) {
+        // Imports only add responses. Questionnaire definitions are never restored or changed.
+        parsed = parsed.responses;
+      }
       if (!Array.isArray(parsed)) {
         parsed = [parsed];
       }
       const formatted: SurveyResponse[] = parsed.map((item: any, idx: number) => ({
-        id: item.id || `resp_import_${Date.now()}_${idx}`,
+        id: item.id || `resp_import_${crypto.randomUUID()}`,
         surveyId: item.surveyId || currentSurvey?.id || 'survey_mauritania_dos',
         userName: item.userName || item.nombre || `Participante ${idx + 1}`,
         userLanguage: item.userLanguage || item.idioma || 'es',
@@ -423,7 +377,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
         setImportSuccessAlert('');
       }, 1500);
     } catch (err: any) {
-      setImportErrorAlert('El formato JSON ingresado no es válido: ' + (err.message || String(err)));
+      setImportErrorAlert('No se pudo importar. Los registros existentes se conservaron: ' + (err.message || String(err)));
     } finally {
       setImportLoading(false);
     }
@@ -1812,49 +1766,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                   <span>{importErrorAlert}</span>
                 </div>
               )}
-
-              {/* OPTION 1: 1-CLICK RESTORE/INCORPORATE MAURITANIA RESPONSES */}
-              <div className="p-5 bg-gradient-to-br from-indigo-50/80 to-purple-50/50 rounded-2xl border border-indigo-100 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-indigo-950 uppercase tracking-wider font-mono">
-                        Opción Rápida: Incorporar Respuestas de Campo de Mauritania
-                      </h5>
-                      <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
-                        Carga el conjunto completo de encuestas recopiladas en Mauritania (Nuadibú y Nuakchot) con las 42 preguntas respondidas, perfiles, salud, tránsito y derechos.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-between gap-3 flex-wrap border-t border-indigo-100/70">
-                  <span className="text-[11px] text-indigo-700 font-semibold font-mono">
-                    • 8 encuestas completas de terreno listas para guardar
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleRestoreMauritaniaResponses}
-                    disabled={importLoading}
-                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-200 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {importLoading ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Guardando en Base de Datos...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Database className="w-3.5 h-3.5" />
-                        <span>Incorporar Respuestas a Firestore</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
 
               {/* OPTION 2: PASTE JSON OR TEXT */}
               <div className="space-y-3 border-t border-slate-100 pt-5">

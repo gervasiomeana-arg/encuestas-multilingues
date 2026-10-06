@@ -11,7 +11,7 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+export const firebaseApp = initializeApp(firebaseConfig);
 
 // Initialize Firestore on the custom database id provided in the config as the third argument
-export const db = initializeFirestore(app, {}, "ai-studio-f947253c-4469-4545-9268-02ec4d0ccde0");
+export const db = initializeFirestore(firebaseApp, {}, "ai-studio-f947253c-4469-4545-9268-02ec4d0ccde0");

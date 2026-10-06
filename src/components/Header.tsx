@@ -5,7 +5,7 @@ interface HeaderProps {
   viewMode: 'user' | 'admin';
   onChangeViewMode: (mode: 'user' | 'admin') => void;
   totalSurveys: number;
-  totalResponses: number;
+  totalResponses?: number;
 }
 
 export default function Header({ viewMode, onChangeViewMode, totalSurveys, totalResponses }: HeaderProps) {
@@ -34,12 +34,14 @@ export default function Header({ viewMode, onChangeViewMode, totalSurveys, total
               <span className="font-medium text-slate-700">{totalSurveys}</span>
               <span>Encuestas</span>
             </div>
+            {totalResponses !== undefined && <>
             <div className="h-4 w-px bg-slate-200"></div>
             <div className="flex items-center space-x-2">
               <CheckCircle className="w-4 h-4 text-slate-400" />
               <span className="font-semibold text-slate-700">{totalResponses}</span>
               <span>Respuestas Históricas</span>
             </div>
+            </>}
           </div>
 
           {/* Role Changer Menu (Segmented Button Container) */}

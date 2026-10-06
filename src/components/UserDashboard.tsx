@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, COUNTRIES } from '../types';
-import { saveResponse, saveSurvey } from '../firebaseService';
+import { saveResponse } from '../firebaseService';
 import { translateSurveyWithAI } from '../utils/api';
 
 interface UserDashboardProps {
@@ -177,7 +177,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
           }
         };
 
-        await saveSurvey(updatedSurvey);
+        // Translation is session-only: never overwrite a stored questionnaire.
         
         // Update active selection to immediately show translation if user was viewing it
         if (activeSurvey && activeSurvey.id === survey.id) {
@@ -185,7 +185,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
         }
         
         // Notify parent state of survey modifications
-        onSurveySubmitted();
+        // No refresh needed: the stored survey remains unchanged.
       } else {
         setTranslateError(response.error || "La traducción automática no se pudo completar.");
       }
@@ -285,7 +285,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   // Submit survey responses to Firestore
   const handleSubmitSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeSurvey) return;
+    if (!activeSurvey || submitting) return;
 
     const localized = getLocalizedContent(activeSurvey);
 
@@ -321,11 +321,11 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
 
     try {
       const newResponse: SurveyResponse = {
-        id: `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: `resp_${crypto.randomUUID()}`,
         surveyId: activeSurvey.id,
         userName: userName.trim(),
         userLanguage: userLang,
-        userCountry: userCountry,
+        userCountry: activeSurvey.targetCountry,
         answers: currentAnswers,
         submittedAt: new Date().toISOString()
       };

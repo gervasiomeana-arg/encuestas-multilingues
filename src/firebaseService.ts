@@ -1,5 +1,7 @@
-import { collection, doc, getDocs, getDoc, setDoc, deleteDoc, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDocs, getDoc, setDoc, runTransaction, query } from 'firebase/firestore';
 import { db } from './firebase';
+import { requireAdmin } from './authService';
+import { validateResponseBatch } from './utils/dataProtection';
 import { Survey, SurveyResponse } from './types';
 
 const SURVEYS_COLLECTION = 'surveys';
@@ -81,7 +83,13 @@ export async function getSurveyById(id: string): Promise<Survey | null> {
 export async function saveSurvey(survey: Survey): Promise<void> {
   try {
     const docRef = doc(db, SURVEYS_COLLECTION, survey.id);
-    await setDoc(docRef, survey);
+    await requireAdmin();
+    await runTransaction(db, async transaction => {
+      if ((await transaction.get(docRef)).exists()) {
+        throw new Error('Las encuestas existentes están protegidas. Guarda una copia nueva.');
+      }
+      transaction.set(docRef, survey);
+    });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${SURVEYS_COLLECTION}/${survey.id}`);
   }
@@ -98,13 +106,22 @@ export async function saveResponse(response: SurveyResponse): Promise<void> {
 
 export async function saveMultipleResponses(responses: SurveyResponse[]): Promise<number> {
   try {
-    let saved = 0;
-    for (const r of responses) {
-      const docRef = doc(db, RESPONSES_COLLECTION, r.id);
-      await setDoc(docRef, r);
-      saved++;
-    }
-    return saved;
+    await requireAdmin();
+    validateResponseBatch(responses);
+    const references = responses.map(r => doc(db, RESPONSES_COLLECTION, r.id));
+    await runTransaction(db, async transaction => {
+      const snapshots = await Promise.all(references.map(ref => transaction.get(ref)));
+      if (snapshots.some(snapshot => snapshot.exists())) {
+        throw new Error('El archivo contiene IDs ya guardados. No se importó ni reemplazó ningún registro.');
+      }
+      const surveyIds = [...new Set(responses.map(r => r.surveyId))];
+      const surveys = await Promise.all(surveyIds.map(id => transaction.get(doc(db, SURVEYS_COLLECTION, id))));
+      if (surveys.some(snapshot => !snapshot.exists())) {
+        throw new Error('Una respuesta apunta a una encuesta que no existe. No se importó ningún registro.');
+      }
+      references.forEach((ref, index) => transaction.set(ref, responses[index]));
+    });
+    return responses.length;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, RESPONSES_COLLECTION);
   }
@@ -112,6 +129,7 @@ export async function saveMultipleResponses(responses: SurveyResponse[]): Promis
 
 export async function getResponsesBySurveyId(surveyId: string): Promise<SurveyResponse[]> {
   try {
+    await requireAdmin();
     const querySnapshot = await getDocs(
       collection(db, RESPONSES_COLLECTION)
     );
@@ -135,6 +153,7 @@ export async function getResponsesBySurveyId(surveyId: string): Promise<SurveyRe
 
 export async function getAllResponses(): Promise<SurveyResponse[]> {
   try {
+    await requireAdmin();
     const querySnapshot = await getDocs(
       collection(db, RESPONSES_COLLECTION)
     );
@@ -148,18 +167,7 @@ export async function getAllResponses(): Promise<SurveyResponse[]> {
   }
 }
 
-export async function deleteSurvey(surveyId: string, deleteResponses: boolean = false): Promise<void> {
-  try {
-    await deleteDoc(doc(db, SURVEYS_COLLECTION, surveyId));
-    
-    // Only clean up responses if explicitly requested by admin
-    if (deleteResponses) {
-      const responses = await getResponsesBySurveyId(surveyId);
-      for (const r of responses) {
-        await deleteDoc(doc(db, RESPONSES_COLLECTION, r.id));
-      }
-    }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${SURVEYS_COLLECTION}/${surveyId}`);
-  }
+// Existing questionnaires and responses must never be deleted from this app.
+export async function deleteSurvey(_surveyId: string, _deleteResponses: boolean = false): Promise<void> {
+  throw new Error('La eliminación está deshabilitada para conservar las encuestas y sus registros.');
 }

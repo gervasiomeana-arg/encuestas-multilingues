@@ -6,12 +6,33 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import * as pdf from "pdf-parse";
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { requireAdministrator, createApiLimiter } from './serverSecurity';
 
 // Ensure environment variables are loaded in local developer environment
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
+// Must match the EXISTING project in src/firebase.ts. Do not use the remix config.
+const adminApp = getApps().find(app => app.name === 'survey-auth') || initializeApp({
+  projectId: process.env.FIREBASE_PROJECT_ID || 'chromatic-pride-0ttsj'
+}, 'survey-auth');
+const adminOnly = requireAdministrator(async token => {
+  const claims = await getAuth(adminApp).verifyIdToken(token);
+  return { admin: claims.admin };
+});
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+app.use(['/api/parse-survey', '/api/translate-survey'], createApiLimiter());
+app.use('/api/parse-survey', adminOnly);
 
 // Body parser middlewares
 app.use(express.json({ limit: "10mb" }));
@@ -54,12 +75,12 @@ async function generateContentWithRetry(
     } catch (error: any) {
       attempt++;
       const errMessage = error instanceof Error ? error.message : String(error);
-      const isTransient = 
-        errMessage.includes("503") || 
-        errMessage.includes("UNAVAILABLE") || 
-        errMessage.includes("high demand") || 
+      const isTransient =
+        errMessage.includes("503") ||
+        errMessage.includes("UNAVAILABLE") ||
+        errMessage.includes("high demand") ||
         errMessage.includes("temporary") ||
-        errMessage.includes("429") || 
+        errMessage.includes("429") ||
         errMessage.includes("RESOURCE_EXHAUSTED") ||
         (error?.status && [429, 503].includes(error.status));
 
@@ -85,21 +106,21 @@ async function generateContentWithRetry(
 function getFriendlyAIErrorMessage(error: any): string {
   const errStr = error instanceof Error ? error.message : String(error);
   if (
-    errStr.includes("503") || 
-    errStr.includes("UNAVAILABLE") || 
-    errStr.includes("high demand") || 
+    errStr.includes("503") ||
+    errStr.includes("UNAVAILABLE") ||
+    errStr.includes("high demand") ||
     errStr.includes("temporary")
   ) {
     return "El servidor de Inteligencia Artificial (Gemini) está experimentando una demanda extremadamente alta en este momento (Error 503). Por favor, intenta de nuevo en unos segundos. Por lo general, el servicio se restablece de inmediato.";
   }
   if (
-    errStr.includes("429") || 
-    errStr.includes("RESOURCE_EXHAUSTED") || 
+    errStr.includes("429") ||
+    errStr.includes("RESOURCE_EXHAUSTED") ||
     errStr.includes("quota")
   ) {
     return "Se ha superado temporalmente el límite de consultas permitidas a la IA (Error 429). Por favor, intenta de nuevo en unos momentos.";
   }
-  return `Error de la IA: ${errStr}`;
+  return "No se pudo completar la operación. Reintenta más tarde.";
 }
 
 /**
@@ -160,7 +181,7 @@ function parseRawTextToSurveyVerbatim(text: string, filename: string) {
       if (!currentQuestion.options) {
         currentQuestion.options = [];
       }
-      
+
       let optionText = line;
       if (isBulletOption) {
         optionText = line.replace(/^[•\-\*\+]\s*/, "");
@@ -179,20 +200,20 @@ function parseRawTextToSurveyVerbatim(text: string, filename: string) {
 
       let type: "text" | "rating" | "boolean" | "single_choice" = "text";
       const lineLower = line.toLowerCase();
-      
+
       if (
-        lineLower.includes("sí o no") || 
-        lineLower.includes("si o no") || 
+        lineLower.includes("sí o no") ||
+        lineLower.includes("si o no") ||
         lineLower.includes("verdadero o falso") ||
         lineLower.includes("(si/no)") ||
         lineLower.includes("(sí/no)")
       ) {
         type = "boolean";
       } else if (
-        lineLower.includes("escala del") || 
-        lineLower.includes("escala de 1") || 
-        lineLower.includes("(1 al") || 
-        lineLower.includes("(1-5)") || 
+        lineLower.includes("escala del") ||
+        lineLower.includes("escala de 1") ||
+        lineLower.includes("(1 al") ||
+        lineLower.includes("(1-5)") ||
         lineLower.includes("(1-10)")
       ) {
         type = "rating";
@@ -243,8 +264,8 @@ app.post("/api/parse-survey", upload.single("file"), async (req, res) => {
     if (mimetype === "application/pdf") {
       try {
         const parser = new pdf.PDFParse({ data: req.file.buffer });
-        const parsedPdf = await parser.getText();
-        extractedText = parsedPdf.text;
+        try { extractedText = (await parser.getText()).text; }
+        finally { await parser.destroy(); }
       } catch (pdfErr: any) {
         throw new Error(`Error al procesar el archivo PDF: ${pdfErr.message}`);
       }
@@ -259,7 +280,9 @@ app.post("/api/parse-survey", upload.single("file"), async (req, res) => {
         throw new Error(`Error al procesar el archivo de Word (.docx): ${docErr.message}`);
       }
     } else {
-      // Fallback as plain text if it looks like any text file
+      if (!filename.toLowerCase().endsWith('.txt')) {
+        res.status(400).json({ error: 'Solo se admiten PDF, DOCX o TXT.' }); return;
+      }
       extractedText = req.file.buffer.toString("utf8");
     }
 
@@ -320,7 +343,7 @@ ${extractedText}
     });
 
     let resultText = response.text || "";
-    
+
     // Clean up codeblock if Gemini returns it decorated
     if (resultText.includes("```json")) {
       resultText = resultText.substring(resultText.indexOf("```json") + 7);
@@ -329,15 +352,15 @@ ${extractedText}
       resultText = resultText.substring(resultText.indexOf("```") + 3);
       resultText = resultText.substring(0, resultText.lastIndexOf("```"));
     }
-    
+
     try {
       const parsedSurvey = JSON.parse(resultText.trim());
       res.json({ success: true, survey: parsedSurvey });
     } catch (jsonErr) {
-      console.error("Error al analizar el formato JSON devuelto por Gemini:", resultText);
-      res.status(500).json({ 
+      console.error("La IA devolvió un formato de encuesta inválido.");
+      res.status(500).json({
         error: "La IA no pudo estructurar el contenido en un formato JSON válido.",
-        rawResponse: resultText 
+        // Raw AI content is not included in public error responses.
       });
     }
   } catch (err: any) {
@@ -393,7 +416,7 @@ Encuesta original a traducir:
     });
 
     let resultText = response.text || "";
-    
+
     if (resultText.includes("```json")) {
       resultText = resultText.substring(resultText.indexOf("```json") + 7);
       resultText = resultText.substring(0, resultText.lastIndexOf("```"));
@@ -406,10 +429,10 @@ Encuesta original a traducir:
       const parsedTranslation = JSON.parse(resultText.trim());
       res.json({ success: true, translation: parsedTranslation });
     } catch (jsonErr) {
-      console.error("Error al analizar el formato JSON de traducción:", resultText);
-      res.status(500).json({ 
-        error: "La IA no pudo formatear la traducción como un JSON válido.", 
-        rawResponse: resultText 
+      console.error("La IA devolvió un formato de traducción inválido.");
+      res.status(500).json({
+        error: "La IA no pudo formatear la traducción como un JSON válido.",
+        // Raw AI content is not included in public error responses.
       });
     }
   } catch (err: any) {
@@ -431,7 +454,11 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     // Production mode: serve built client assets from /dist
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(process.cwd(), "dist", "client");
+    app.use((req, res, next) => {
+      if (/\.(?:cjs|map)$/.test(req.path)) { res.sendStatus(404); return; }
+      next();
+    });
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
