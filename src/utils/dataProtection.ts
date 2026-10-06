@@ -18,10 +18,14 @@ export function validateResponseBatch(responses: SurveyResponse[]) {
   }
 }
 
+export function ratingScore(value: unknown): number | null {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const score = Number(value);
+  return Number.isInteger(score) && score >= 1 && score <= 10 ? score : null;
+}
+
 export function ratingAverage(values: unknown[]): string {
-  const scores = values.filter(value => typeof value === 'number' ||
-    (typeof value === 'string' && value.trim() !== '')).map(Number)
-    .filter(value => Number.isFinite(value) && value >= 1 && value <= 10);
+  const scores = values.map(ratingScore).filter((value): value is number => value !== null);
   return scores.length ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 'N/A';
 }
 

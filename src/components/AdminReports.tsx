@@ -37,7 +37,8 @@ import {
 } from 'lucide-react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, SurveyQuestion } from '../types';
 import { saveMultipleResponses } from '../firebaseService';
-import { ratingAverage, csvCell } from '../utils/dataProtection';
+import { ratingAverage, ratingScore } from '../utils/dataProtection';
+import { ratingDistribution, surveyReportCSV, resolveResponseSurvey } from '../utils/reportData';
 import { 
   normalizeAnswerToSpanish, 
   getQuestionTypeLabelES,
@@ -132,8 +133,9 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   // ---------------------------------------------------------------------------------
 
   const computeChartData = (question: SurveyQuestion) => {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number> = Object.create(null);
     const questionType = question.type;
+    if (questionType === 'rating') return ratingDistribution(filteredResponses.map(response => response.answers[question.id]));
     const options = question.options || [];
 
     // Initialize canonical Spanish options
@@ -144,10 +146,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
       options.forEach(opt => {
         counts[opt] = 0;
       });
-    } else if (questionType === 'rating') {
-      for (let i = 1; i <= 10; i++) {
-        counts[i.toString()] = 0;
-      }
     }
 
     let totalAnswersCount = 0;
@@ -189,16 +187,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
           porcentaje: totalBool > 0 ? ((noVotes / totalBool) * 100).toFixed(1) : '0.0' 
         }
       ];
-    } else if (questionType === 'rating') {
-      return Object.keys(counts).map(num => {
-        const votes = counts[num] || 0;
-        return {
-          name: `Puntaje ${num}`,
-          score: num,
-          Votos: votes,
-          porcentaje: totalAnswersCount > 0 ? ((votes / totalAnswersCount) * 100).toFixed(1) : '0.0'
-        };
-      });
     } else {
       // General choice options (single_choice, multiple_choice)
       const orderedKeys = options.length > 0 ? options : Object.keys(counts);
@@ -268,39 +256,15 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     }
   };
 
-  // Export current survey responses to CSV (100% Spanish translated)
+  // Export original values alongside the existing normalization, without writes.
   const handleExportCSV = () => {
     if (!currentSurvey || filteredResponses.length === 0) {
       alert("No hay respuestas registradas para exportar en esta selección.");
       return;
     }
 
-    const headers = ['ID Respuesta', 'Fecha', 'Participante', 'Idioma Original', 'País'];
-    currentSurvey.questions.forEach((q, i) => {
-      headers.push(`P${i + 1}: ${q.text.replace(/[\r\n",]/g, ' ')}`);
-    });
-
-    const rows = filteredResponses.map(res => {
-      const row = [
-        res.id,
-        new Date(res.submittedAt).toLocaleString('es-ES'),
-        res.userName || 'Anónimo',
-        res.userLanguage || 'es',
-        res.userCountry || currentSurvey.targetCountry || 'N/A'
-      ];
-
-      currentSurvey.questions.forEach(q => {
-        const raw = res.answers[q.id];
-        const norm = normalizeAnswerToSpanish(raw, q, currentSurvey);
-        const strVal = Array.isArray(norm) ? norm.join('; ') : String(norm ?? '');
-        row.push(strVal);
-      });
-
-      return row.map(csvCell).join(',');
-    });
-
     const localitySuffix = selectedLocality === 'ALL' ? 'todas' : selectedLocality.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const csvContent = '\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\n');
+    const csvContent = surveyReportCSV(currentSurvey, filteredResponses);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -401,6 +365,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     
     const answeredCount = filteredResponses.filter(r => {
       const a = r.answers[q.id];
+      if (q.type === 'rating') return ratingScore(a) !== null;
       return a !== undefined && a !== null && a !== '' && (!Array.isArray(a) || a.length > 0);
     }).length;
 
@@ -427,9 +392,9 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
               {getQuestionTypeLabelES(q.type)}
             </span>
             <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold font-mono px-2.5 py-1 rounded-md border border-indigo-200">
-              {answeredCount} VOTOS
+              {answeredCount} RESPUESTAS
             </span>
-            {averageRating && (
+            {averageRating && averageRating !== 'N/A' && (
               <span className="text-[10px] bg-amber-50 border border-amber-200 text-amber-800 font-bold uppercase tracking-wider px-2.5 py-1 rounded-md flex items-center gap-1 font-mono">
                 <Award className="w-3 h-3 text-amber-600" />
                 Promedio: {averageRating}/10
@@ -437,6 +402,13 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
             )}
           </div>
         </div>
+
+        {q.type === 'multiple_choice' && (
+          <p className="text-xs text-slate-500">Porcentajes sobre el total de selecciones, no sobre participantes. Una respuesta puede incluir varias opciones.</p>
+        )}
+        {q.type === 'rating' && (
+          <p className="text-xs text-slate-500">Gráfico y promedio: puntajes enteros entre 1 y 10. Los valores fuera de escala o inválidos se conservan en el registro y el CSV original.</p>
+        )}
 
         {/* SUBTITLE: GRÁFICO DE BARRAS */}
         {q.type !== 'text' && (
@@ -1094,7 +1066,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
           {/* BUTTON 4: CSV */}
           <button
             onClick={handleExportCSV}
-            title="Descargar respuestas en archivo CSV (100% traducido al español)"
+            title="Descargar respuestas originales y normalizadas en CSV"
             className="px-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-2xs"
           >
             <Download className="w-3.5 h-3.5" />
@@ -1438,8 +1410,8 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {filteredResponses.map((res) => {
-                    const relatedSurvey = surveys.find(s => s.id === res.surveyId);
-                    const relatedSurveyTitle = relatedSurvey?.title || "Encuesta Eliminada";
+                    const relatedSurvey = resolveResponseSurvey(surveys, res.surveyId);
+                    const relatedSurveyTitle = relatedSurvey?.title || "Encuesta no disponible";
                     const activeLangName = AVAILABLE_LANGUAGES.find(l => l.code === res.userLanguage)?.name || res.userLanguage;
 
                     return (
@@ -1660,7 +1632,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
               {(() => {
-                const targetSurvey = surveys.find(s => s.id === viewingResponse.surveyId);
+                const targetSurvey = resolveResponseSurvey(surveys, viewingResponse.surveyId);
                 if (!targetSurvey) {
                   return (
                     <div className="text-center text-slate-400 py-8 text-xs">
@@ -1684,7 +1656,12 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                         </span>
                       </div>
                       
+                      <div className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200/60">
+                        <p className="font-bold mb-1">Respuesta original guardada</p>
+                        <p className="whitespace-pre-wrap break-words">{Array.isArray(rawAns) ? JSON.stringify(rawAns) : String(rawAns ?? '') || 'Sin respuesta'}</p>
+                      </div>
                       <div className="text-xs font-semibold text-indigo-900 bg-white p-2.5 rounded-lg border border-slate-200/60">
+                        <p className="text-slate-500 font-normal mb-1">Interpretación normalizada para informes</p>
                         {rawAns === undefined || rawAns === null || rawAns === '' ? (
                           <span className="text-slate-400 italic font-normal">Sin respuesta</span>
                         ) : Array.isArray(normalizedAns) ? (

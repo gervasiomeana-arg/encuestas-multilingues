@@ -145,3 +145,19 @@ semántica del formulario. No se verificó ni activó producción.
   respuesta nueva, evitando enviar `undefined` a Firestore.
 - Esto no garantiza deduplicación entre dispositivos, nuevas sesiones o fallos
   de conexión cuyo resultado sea incierto. No cambia respuestas históricas.
+
+## Informes y trazabilidad
+
+- Gráficos y promedio de valoración usan la misma escala: números enteros entre
+  1 y 10. Los valores inválidos o fuera de escala permanecen guardados, pero no
+  cuentan como puntajes válidos. El PDF y la pantalla indican el criterio.
+- La fórmula de porcentajes de opción múltiple se conserva; se aclara que su base
+  son selecciones y no participantes. Los contadores de formularios dicen respuestas.
+- El CSV incluye una columna original y otra normalizada por pregunta. Conserva
+  el instante original y no inventa país si falta. Los arrays originales se
+  representan como JSON; se mantienen el escape CSV y la protección de fórmulas.
+  La normalización existente es una interpretación y no garantiza traducción exacta.
+- El detalle de respuestas reconoce los dos aliases históricos de Mauritania
+  cuando no existe la definición exacta; si existe, tiene prioridad. Los IDs
+  guardados no cambian. La unión histórica usada por los gráficos se conserva.
+- El JSON sigue siendo el respaldo íntegro, sin normalización de respuestas.

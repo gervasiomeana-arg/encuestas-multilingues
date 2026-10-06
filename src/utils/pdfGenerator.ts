@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { Survey, SurveyQuestion, SurveyResponse } from '../types';
 import { getQuestionTypeLabelES } from './answerTranslator';
+import { ratingScore } from './dataProtection';
 
 const PALETTE = [
   [79, 70, 229],   // #4f46e5 (indigo-600)
@@ -180,7 +181,9 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
   doc.setTextColor(100, 116, 139);
   doc.text(`Distribución de frecuencias para ${localityLabel}`, margin, currentY + 12);
 
-  currentY += 24;
+  doc.text('Opción múltiple: porcentajes sobre selecciones, no sobre participantes.', margin, currentY + 24);
+  doc.text('Valoraciones: solo enteros de 1 a 10; valores inválidos conservados en CSV original.', margin, currentY + 36);
+  currentY += 48;
 
   // ---------------------------------------------------------
   // ITERATE OVER QUESTIONS AND RENDER CLEAN BLOCKS
@@ -194,12 +197,13 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
     const averageRating = q.type === 'rating' ? calculateRatingAverage(q.id) : null;
     const answeredCount = filteredResponses.filter(r => {
       const a = r.answers[q.id];
+      if (q.type === 'rating') return ratingScore(a) !== null;
       return a !== undefined && a !== null && a !== '' && (!Array.isArray(a) || a.length > 0);
     }).length;
 
     // Badges on right side
     const typeLabel = getQuestionTypeLabelES(q.type).toUpperCase();
-    const badgeText = `${typeLabel}  |  ${answeredCount} VOTOS`;
+    const badgeText = `${typeLabel}  |  ${answeredCount} RESPUESTAS`;
     doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
     const badgeWidth = doc.getTextWidth(badgeText);
@@ -306,7 +310,7 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
       doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(217, 119, 6); // amber-600
-      doc.text(`Promedio Obtenido: ${averageRating || 'N/A'} / 10 puntos`, cardInnerLeft, itemY + 8);
+      doc.text(averageRating && averageRating !== 'N/A' ? `Promedio Obtenido: ${averageRating} / 10 puntos` : 'Sin puntajes válidos para calcular el promedio.', cardInnerLeft, itemY + 8);
 
       // Mini bar summary of top rating buckets
       itemY += 16;
