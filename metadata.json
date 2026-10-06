@@ -1,0 +1,8 @@
+{
+  "name": "ENCUESTA MAURITANIA",
+  "description": "Formato dinámico y paginado por bloques (Estilo Survio). Esta encuesta es para entender cómo los conflictos, la migración y la situación en Mauritania afectan a la vida de las mujeres. Tus respuestas nos ayudarán a visibilizar situaciones injustas y a pedir cambios a las autoridades y organismos internacionales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
