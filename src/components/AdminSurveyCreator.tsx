@@ -57,6 +57,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   // Parsing file uploaded status
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+  const [fileUploadNotice, setFileUploadNotice] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [useAIForParsing, setUseAIForParsing] = useState(true);
@@ -103,6 +104,8 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
 
   // Upload and parse file via Express backend with Gemini AI
   const handleFileParsing = async (file: File) => {
+    setFileUploadError(null);
+    setFileUploadNotice(null);
     const filename = file.name.toLowerCase();
     if (
       !filename.endsWith('.pdf') && 
@@ -131,7 +134,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         }));
         
         setQuestions(mappedQuestions);
-        setFileUploadError(response.warnings?.join(' ') || 'Revisa las preguntas y opciones extraídas antes de guardar una encuesta nueva.');
+        setFileUploadNotice(response.warnings?.join(' ') || 'Revisa las preguntas y opciones extraídas antes de guardar una encuesta nueva.');
       } else {
         setFileUploadError(response.error || "No se pudo extraer el formato de encuesta de este documento.");
       }
@@ -387,9 +390,14 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         </div>
 
         {fileUploadError && (
-          <div className="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs flex items-center gap-2">
+          <div role="alert" className="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
             <span>{fileUploadError}</span>
+          </div>
+        )}
+        {fileUploadNotice && (
+          <div role="status" className="mt-3 bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs">
+            Documento cargado. {fileUploadNotice}
           </div>
         )}
       </section>

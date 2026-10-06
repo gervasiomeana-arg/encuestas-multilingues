@@ -1,4 +1,17 @@
-import type { RequestHandler } from 'express';
+import type { RequestHandler, ErrorRequestHandler } from 'express';
+
+// Do not expose parser messages, request contents, file paths or stacks.
+export const apiErrorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+  if (res.headersSent) { next(error); return; }
+  const tooLarge = error?.type === 'entity.too.large' || error?.code === 'LIMIT_FILE_SIZE';
+  const malformed = error?.type === 'entity.parse.failed';
+  const uploadError = typeof error?.code === 'string' && error.code.startsWith('LIMIT_');
+  res.status(tooLarge ? 413 : malformed || uploadError ? 400 : 500).json({
+    error: tooLarge ? 'El archivo o la solicitud supera el tamaño permitido.' :
+      malformed ? 'El contenido de la solicitud no es JSON válido.' :
+      uploadError ? 'La carga de archivos no es válida.' : 'No se pudo completar la operación. Reintenta más tarde.'
+  });
+};
 
 type Claims = { admin?: unknown };
 export function requireAdministrator(verify: (token: string) => Promise<Claims>): RequestHandler {

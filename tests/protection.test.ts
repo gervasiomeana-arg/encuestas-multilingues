@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import multer from 'multer';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { validateResponseBatch, ratingAverage, csvCell } from '../src/utils/dataProtection';
-import { requireAdministrator, createApiLimiter } from '../serverSecurity';
+import { requireAdministrator, createApiLimiter, apiErrorHandler } from '../serverSecurity';
 import { MAURITANIA_SURVEY } from '../src/utils/mauritaniaDefaultSurvey';
 
 const response = { id: 'test-only', surveyId: 'survey-test', userName: 'Anónimo',
@@ -74,6 +75,41 @@ test('API authorizes only verified boolean admin claims and rejects missing/inva
     }
     assert.equal((await fetch(base + '/limited')).status, 200);
     assert.equal((await fetch(base + '/limited')).status, 429);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('API returns safe JSON for malformed bodies, oversized uploads and unexpected failures', async () => {
+  const app = express();
+  app.use(express.json({ limit: '1kb' }));
+  app.post('/json', (_req, res) => res.json({ ok: true }));
+  app.post('/upload', multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 } }).single('file'),
+    (_req, res) => res.json({ ok: true }));
+  app.get('/failure', () => { throw new Error('PRIVATE_REQUEST_CONTENT /private/server.ts'); });
+  app.use(apiErrorHandler);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  async function check(result: Response, status: number) {
+    assert.equal(result.status, status);
+    assert.match(result.headers.get('content-type') || '', /application\/json/);
+    const body = await result.json();
+    assert.equal(typeof body.error, 'string');
+    assert.doesNotMatch(JSON.stringify(body), /PRIVATE_REQUEST_CONTENT|server\.ts|SyntaxError|stack/);
+  }
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    await check(await fetch(base + '/json', { method: 'POST', headers, body: '{"PRIVATE_REQUEST_CONTENT":' }), 400);
+    await check(await fetch(base + '/json', { method: 'POST', headers, body: JSON.stringify({ text: 'a'.repeat(2048) }) }), 413);
+    const upload = new FormData();
+    upload.set('file', new Blob(['a'.repeat(64)]), 'test.txt');
+    await check(await fetch(base + '/upload', { method: 'POST', body: upload }), 413);
+    const unexpected = new FormData();
+    unexpected.set('unexpected', new Blob(['small']), 'test.txt');
+    await check(await fetch(base + '/upload', { method: 'POST', body: unexpected }), 400);
+    await check(await fetch(base + '/failure'), 500);
+    assert.equal((await fetch(base + '/json', { method: 'POST', headers, body: '{}' })).status, 200);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }

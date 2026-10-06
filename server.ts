@@ -8,7 +8,7 @@ import { GoogleGenAI } from "@google/genai";
 import * as pdf from "pdf-parse";
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { requireAdministrator, createApiLimiter } from './serverSecurity';
+import { requireAdministrator, createApiLimiter, apiErrorHandler } from './serverSecurity';
 import { parseRawTextToSurveyVerbatim } from './src/utils/surveyParser';
 import { validSurveyDraft, validTranslationRequest } from './src/utils/apiValidation';
 import { translationCoverage } from './src/utils/surveyValidation';
@@ -38,8 +38,8 @@ app.use(['/api/parse-survey', '/api/translate-survey'], createApiLimiter());
 app.use('/api/parse-survey', adminOnly);
 
 // Body parser middlewares
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "256kb" }));
+app.use(express.urlencoded({ extended: true, limit: "256kb" }));
 
 // Configure Multer to intercept files in memory
 const upload = multer({
@@ -337,6 +337,11 @@ Encuesta original a traducir:
 // -------------------------------------------------------------------------
 // VITE OR STATIC FRONTEND SERVING
 // -------------------------------------------------------------------------
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'La función solicitada no existe.' });
+});
+app.use(apiErrorHandler);
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     // Development mode: mount Vite dev middleware

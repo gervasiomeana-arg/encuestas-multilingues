@@ -76,7 +76,7 @@ y el emulador local (`127.0.0.1:8085`). Nunca configurar su ejecución contra un
 base real. `npm test` omite las pruebas de reglas cuando no hay emulador;
 `npm run test:rules` debe ejecutarlas efectivamente antes de activar permisos.
 
-## Pendiente en esta primera corrección
+## Pendiente antes de activar
 
 - No se han activado la cuenta, las reglas ni el despliegue en producción.
 - Las nuevas respuestas siguen siendo públicas para no exigir una cuenta a cada
@@ -123,3 +123,14 @@ La validación de respuestas descrita aquí es del formulario: un cliente extern
 puede intentar crear respuestas directamente en Firestore. Las reglas protegen
 lectura, modificación y borrado y validan estructura, pero no reproducen toda la
 semántica del formulario. No se verificó ni activó producción.
+
+## Revisión del arranque y errores de carga
+
+- `npm start` selecciona explícitamente el modo de producción y sirve solamente
+  el cliente compilado. `npm run dev` sigue reservado al desarrollo local.
+- Las solicitudes JSON se limitan a 256 KB; los archivos conservan el límite de
+  10 MB. Los errores de JSON y Multer devuelven códigos 400/413 y mensajes seguros,
+  sin contenido de la solicitud, rutas internas ni trazas del servidor.
+- Las rutas API inexistentes responden 404 en JSON en vez de entregar la SPA.
+- Una importación correcta muestra un aviso de revisión; los errores reales
+  mantienen su mensaje de error. Esto solo afecta al borrador de encuestas nuevas.
