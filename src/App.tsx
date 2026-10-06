@@ -152,7 +152,6 @@ export default function App() {
 
                   <UserDashboard 
                     surveys={activeDisplayedSurveys}
-                    onSurveySubmitted={syncData}
                     onActiveStateChange={setIsAnsweringSurvey}
                   />
                 </div>

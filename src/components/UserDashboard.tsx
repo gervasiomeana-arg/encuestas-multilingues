@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Globe, 
   User, 
@@ -23,11 +23,10 @@ import { answerError, optionMatches, toggleChoices, translationCoverage } from '
 
 interface UserDashboardProps {
   surveys: Survey[];
-  onSurveySubmitted: () => void;
   onActiveStateChange?: (isAnsweringAndAccepted: boolean) => void;
 }
 
-export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStateChange }: UserDashboardProps) {
+export default function UserDashboard({ surveys, onActiveStateChange }: UserDashboardProps) {
   // State for user tracking (Preset to anonymous / Mauritania per request)
   const [userName, setUserName] = useState<string>('Anónimo');
   const [userLang, setUserLang] = useState<string>('es'); // Default browser language code
@@ -38,6 +37,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   const [currentAnswers, setCurrentAnswers] = useState<Record<string, any>>({});
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
   
   // Translation on-the-fly state
   const [translatingId, setTranslatingId] = useState<string | null>(null);
@@ -282,7 +282,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   // Submit survey responses to Firestore
   const handleSubmitSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeSurvey || submitting) return;
+    if (!activeSurvey || submissionInFlight.current || submittedSuccess) return;
 
     const localized = getLocalizedContent(activeSurvey);
 
@@ -310,6 +310,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
     }
 
     setFormError(null);
+    submissionInFlight.current = true;
     setSubmitting(true);
 
     try {
@@ -318,17 +319,17 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
         surveyId: activeSurvey.id,
         userName: userName.trim(),
         userLanguage: userLang,
-        userCountry: activeSurvey.targetCountry,
+        ...(activeSurvey.targetCountry ? { userCountry: activeSurvey.targetCountry } : {}),
         answers: currentAnswers,
         submittedAt: new Date().toISOString()
       };
 
       await saveResponse(newResponse);
       setSubmittedSuccess(true);
-      onSurveySubmitted(); // Refresh active dashboard counter
     } catch (err: any) {
       setFormError("Ocurrió un error al intentar enviar tu encuesta a la base de datos.");
     } finally {
+      submissionInFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -348,6 +349,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
           </p>
           <div className="relative max-w-xs mx-auto">
             <select
+              disabled={submitting}
               value={userLang}
               onChange={(e) => {
                 setUserLang(e.target.value);
@@ -449,6 +451,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
 
                 {/* Question Canvas Form */}
                 <form onSubmit={handleSubmitSurvey} className="p-6 md:p-8 space-y-8">
+                  <fieldset disabled={submitting} className="min-w-0">
                   {submittedSuccess ? (
                     <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 animate-fadeIn">
                       <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center border border-emerald-200 shadow-xs">
@@ -946,6 +949,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                       </div>
                     </>
                   )}
+                  </fieldset>
                 </form>
               </>
             );

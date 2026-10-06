@@ -134,3 +134,14 @@ semántica del formulario. No se verificó ni activó producción.
 - Las rutas API inexistentes responden 404 en JSON en vez de entregar la SPA.
 - Una importación correcta muestra un aviso de revisión; los errores reales
   mantienen su mensaje de error. Esto solo afecta al borrador de encuestas nuevas.
+
+## Confirmación del envío
+
+- Guardar una respuesta no vuelve a sincronizar y desmontar el portal público:
+  la confirmación de éxito permanece hasta que el visitante decide volver.
+- Los clics repetidos durante un envío quedan bloqueados de forma síncrona;
+  un formulario ya confirmado tampoco vuelve a enviarse.
+- Si una encuesta no tiene país configurado, se omite el campo opcional en la
+  respuesta nueva, evitando enviar `undefined` a Firestore.
+- Esto no garantiza deduplicación entre dispositivos, nuevas sesiones o fallos
+  de conexión cuyo resultado sea incierto. No cambia respuestas históricas.
