@@ -86,9 +86,40 @@ base real. `npm test` omite las pruebas de reglas cuando no hay emulador;
 - El límite de API es por instancia; no es una cuota global multiinstancia ni un
   límite fiable por persona cuando el proxy agrupa IPs. No se confía en encabezados
   de IP suministrados por el cliente. Revisar el proxy al desplegar.
-- No se alteraron consentimiento, textos, opciones, traducciones almacenadas,
-  aliases históricos ni la fórmula de porcentaje de selección múltiple.
-- No se cambió el importador literal ni se garantiza la exactitud de la IA:
-  revisar los documentos y traducciones antes de crear una encuesta nueva.
+- Los textos, opciones, traducciones almacenadas, aliases históricos y la
+  fórmula de porcentaje de selección múltiple se conservan.
+- No se garantiza la exactitud semántica de la IA: revisar documentos y
+  traducciones antes de crear una encuesta nueva.
 - El respaldo de datos reales y la prueba con la cuenta final requieren acceso
   al proyecto original; no se dieron por realizadas.
+
+## Segunda etapa: controles del formulario y documentos
+
+Estos controles se aplican a formularios nuevos; no corrigen, normalizan ni
+vuelven a guardar las respuestas históricas:
+
+- Rechazar el consentimiento impide avanzar y enviar el formulario. Se reconoce
+  la misma opción en las traducciones guardadas, sin modificar sus textos.
+- Se rechazan textos obligatorios vacíos o con solo espacios, opciones ajenas al
+  cuestionario y puntajes inválidos. Se aplica el máximo indicado en el enunciado
+  y se mantiene «Ninguna» como opción excluyente.
+- El selector de idioma también está disponible al abrir un enlace directo a
+  una única encuesta y durante el formulario. Al cambiar de idioma, la selección se reconoce por su posición en las opciones
+  de origen. No se normalizan respuestas guardadas ni se hace clasificación difusa.
+- Las traducciones parciales indican su cobertura. Una traducción nueva incompleta
+  no sustituye la anterior, ni siquiera en memoria. La traducción completa se
+  conserva exclusivamente durante la sesión y puede iniciarse desde la lista.
+- El contenido hassanía usa dirección RTL. El texto de preguntas con dos puntos
+  se conserva salvo los prefijos de bloque que ya son títulos de navegación.
+- El parser no mezcla una pregunta numerada con las opciones de la anterior y no
+  pierde la primera pregunta cuando el archivo no tiene título. Las listas numéricas
+  ambiguas se conservan como preguntas y se exige revisión del borrador. No se
+  promete una extracción literal perfecta de cualquier documento.
+- Se validan tipos, IDs únicos y opciones en borradores importados. La API de
+  traducción limita cantidad y longitud antes de consultar IA, y comprueba que la
+  salida cubra todas las preguntas y opciones.
+
+La validación de respuestas descrita aquí es del formulario: un cliente externo
+puede intentar crear respuestas directamente en Firestore. Las reglas protegen
+lectura, modificación y borrado y validan estructura, pero no reproducen toda la
+semántica del formulario. No se verificó ni activó producción.

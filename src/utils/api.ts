@@ -3,6 +3,7 @@ import { adminAuthorizationHeaders } from '../authService';
 
 export interface ParseResult {
   success: boolean;
+  warnings?: string[];
   survey?: {
     title: string;
     description: string;

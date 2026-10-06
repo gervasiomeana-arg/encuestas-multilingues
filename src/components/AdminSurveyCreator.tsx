@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Survey, SurveyQuestion, QuestionType, COUNTRIES, AVAILABLE_LANGUAGES, TranslationData } from '../types';
 import { saveSurvey } from '../firebaseService';
+import { validQuestions } from '../utils/apiValidation';
 import { uploadAndParseSurveyFile, translateSurveyWithAI } from '../utils/api';
 
 interface AdminSurveyCreatorProps {
@@ -116,6 +117,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
     try {
       const response = await uploadAndParseSurveyFile(file, useAIForParsing);
       if (response.success && response.survey) {
+        if (!validQuestions(response.survey.questions)) throw new Error("El documento produjo preguntas inválidas o repetidas. Revisa el archivo antes de crear la encuesta.");
         setTitle(response.survey.title);
         setDescription(response.survey.description);
         
@@ -129,6 +131,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         }));
         
         setQuestions(mappedQuestions);
+        setFileUploadError(response.warnings?.join(' ') || 'Revisa las preguntas y opciones extraídas antes de guardar una encuesta nueva.');
       } else {
         setFileUploadError(response.error || "No se pudo extraer el formato de encuesta de este documento.");
       }
@@ -233,6 +236,10 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
       }
     }
 
+    if (!validQuestions(questions)) {
+      setErrorMessage('Revisa los IDs, tipos y opciones: hay preguntas inválidas o repetidas.');
+      return;
+    }
     setSaving(true);
 
     try {
@@ -333,7 +340,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
           {useAIForParsing ? (
             <span><b>Modo Inteligente (Gemini):</b> AI estructurará preguntas, deducirá tipos de respuestas (escala, texto, opción múltiple), pulirá títulos y creará la encuesta ideal. (Sujeto a disponibilidad del servicio de IA).</span>
           ) : (
-            <span><b>Modo Copia Literal Verbatim (Offline / Sin IA):</b> Sáltate la IA. El sistema extraerá de forma 100% estable y al instante el texto del documento al pie de la letra, preservando cada línea, opción y enunciado verbatim. Ideal si la IA experimenta demoras o alta demanda.</span>
+            <span><b>Modo Copia Literal Verbatim (Offline / Sin IA):</b> Sáltate la IA. El sistema propone una estructura a partir del texto extraído. Revisa la numeración, las preguntas y las opciones antes de guardar. Ideal si la IA experimenta demoras o alta demanda.</span>
           )}
         </p>
 
