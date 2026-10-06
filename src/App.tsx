@@ -272,7 +272,7 @@ export default function App() {
                   </div>
 
                   {/* Sub Tab Navigation Selection */}
-                  <div className="no-print flex border-b border-slate-200">
+                  <div className="no-print flex flex-col sm:flex-row border-b border-slate-200">
                     <button
                       onClick={() => setAdminTab('create')}
                       className={`pb-3 text-sm font-semibold tracking-wide border-b-2 px-6 transition-all duration-150 flex items-center gap-2 cursor-pointer ${

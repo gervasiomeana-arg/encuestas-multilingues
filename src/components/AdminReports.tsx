@@ -375,7 +375,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
             <span className="leading-snug">{q.text}</span>
           </h5>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0 max-w-full">
             <span className="text-[10px] bg-slate-100 text-slate-600 font-bold uppercase tracking-wider font-mono px-2.5 py-1 rounded-md border border-slate-200">
               {getQuestionTypeLabelES(q.type)}
             </span>
@@ -400,7 +400,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
 
         {/* SUBTITLE: GRÁFICO DE BARRAS */}
         {q.type !== 'text' && (
-          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-400">
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between text-[11px] font-mono font-bold text-slate-400">
             <span>GRÁFICO DE BARRAS • DISTRIBUCIÓN EN ESPAÑOL</span>
             <span>{answeredCount} de {filteredResponses.length} respuestas</span>
           </div>
@@ -971,10 +971,10 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
       {/* ========================================================================= */}
       {/* TAB MENU HEADER SELECTOR (SCREEN ONLY) */}
       {/* ========================================================================= */}
-      <div className="no-print flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex-col sm:flex-row gap-4">
+      <div className="no-print flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex-col xl:flex-row gap-4">
         
         {/* Left Toggles */}
-        <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+        <div className="flex flex-col lg:flex-row bg-slate-100 p-1 rounded-xl w-full lg:w-auto min-w-0">
           <button
             onClick={() => setActiveTab('analytics')}
             className={`flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-150 cursor-pointer ${
@@ -1000,14 +1000,14 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
         </div>
 
         {/* Right Actions: Survey Switcher + View Report on Screen + PDF Generator Button + CSV */}
-        <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
+        <div className="flex items-center flex-wrap gap-2 w-full xl:w-auto min-w-0">
           <select
             value={selectedSurveyId}
             onChange={(e) => {
               setSelectedSurveyId(e.target.value);
               setSelectedLocality('ALL');
             }}
-            className="flex-1 sm:w-56 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-3 py-2.5 outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            className="w-full sm:w-56 min-w-0 max-w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-3 py-2.5 outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
           >
             {surveys.map(s => (
               <option key={s.id} value={s.id}>
@@ -1252,7 +1252,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                       type="text" 
                       readOnly 
                       value={`${window.location.origin}${window.location.pathname}?surveyId=${currentSurvey.id}`}
-                      className="bg-white border border-slate-200 text-[11px] font-mono p-2.5 rounded-xl text-slate-600 flex-1 md:w-80 outline-hidden select-all"
+                      className="bg-white border border-slate-200 text-[11px] font-mono p-2.5 rounded-xl text-slate-600 flex-1 min-w-0 w-full md:w-80 outline-hidden select-all"
                     />
                     <button
                       type="button"

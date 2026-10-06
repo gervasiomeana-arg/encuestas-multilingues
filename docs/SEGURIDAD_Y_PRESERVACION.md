@@ -177,3 +177,20 @@ semántica del formulario. No se verificó ni activó producción.
   encuesta sin la traducción solicitada. El administrador puede reintentar o
   desactivar explícitamente la traducción para guardar solo el original.
 - Clics repetidos durante creación o importación quedan bloqueados en la sesión.
+
+## Revisión visual aislada
+
+Se comprobó en Chromium headless el portal, el primer bloque del formulario y
+los informes con datos sintéticos, en anchos de 320, 375, 768 y 1440 píxeles.
+Las 12 vistas no presentan desbordamiento horizontal ni errores de JavaScript.
+Se inspeccionaron capturas del encabezado y los controles en celular y escritorio.
+Los servicios Firebase y Authentication fueron sustituidos por simulaciones;
+se bloquearon conexiones externas y escrituras desde la vista de prueba.
+
+- Encabezado y selector de rol se apilan en pantallas pequeñas; los botones de
+  rol tienen una altura mínima de 44 píxeles.
+- Navegación de administración y barra de informes adaptan sus filas al ancho.
+- Selectores, campo del enlace y etiquetas de estadísticas caben en el contenedor.
+
+Esta comprobación usa tamaños de pantalla de navegador, no un teléfono físico.
+No verifica Safari, llamadas reales a IA ni el acceso administrativo de producción.
