@@ -9,6 +9,7 @@
     "start": "NODE_ENV=production node dist/server.cjs",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "check:backup": "node scripts/check-backup.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "test:rules": "firebase emulators:exec --only firestore --project demo-survey-preservation --config firebase.test.json \"npm test\""
   },

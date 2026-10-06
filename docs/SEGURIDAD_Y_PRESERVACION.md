@@ -194,3 +194,32 @@ se bloquearon conexiones externas y escrituras desde la vista de prueba.
 
 Esta comprobación usa tamaños de pantalla de navegador, no un teléfono físico.
 No verifica Safari, llamadas reales a IA ni el acceso administrativo de producción.
+
+## Preparación local de activación
+
+`firebase.production.json` apunta únicamente a la base nombrada original y a
+`firestore.rules`. No incluye hosting, funciones, índices ni migraciones. No usar
+`firebase.test.json` para publicar reglas. El proyecto debe indicarse explícitamente
+como `chromatic-pride-0ttsj`; esta configuración no fija el proyecto de la CLI.
+Antes de cualquier publicación, comprobar que la base existe: la CLI puede intentar
+crear una base si no la encuentra. No se ejecutó publicación desde esta revisión.
+
+Referencia: https://firebase.google.com/docs/firestore/manage-databases
+
+El verificador local solo lee archivos JSON; no utiliza Firebase ni credenciales:
+
+```sh
+npm run check:backup -- respaldo_original.json
+npm run check:backup -- respaldo_original.json respaldo_posterior.json
+```
+
+Comprueba formato integral, conteos e IDs únicos y muestra una huella SHA-256,
+sin imprimir respuestas ni nombres. La comparación detecta registros existentes
+faltantes o modificados y admite registros adicionales. Ignora el orden de los
+documentos y de claves JSON, pero conserva el orden de opciones y arrays.
+Sale con código de error si falta o cambia algún documento original.
+
+Esto comprueba los archivos aportados, no la integridad de la base ni la posibilidad
+de restaurarla. La instantánea descargada por la app no garantiza un corte atómico
+entre colecciones. Aún se necesita un respaldo de infraestructura comprobado y
+acceso al administrador real, antes de coordinar la activación.
