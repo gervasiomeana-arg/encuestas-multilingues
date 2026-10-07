@@ -28,7 +28,6 @@ export default function App() {
 
   // Admin access validation states
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
-  const [adminEmail, setAdminEmail] = useState('');
   const [signingIn, setSigningIn] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
@@ -181,7 +180,7 @@ export default function App() {
                       <Lock className="w-8 h-8 text-indigo-300" />
                     </div>
                     <h3 className="text-xl font-bold">Consola de Administración</h3>
-                    <p className="text-xs text-indigo-200/80">Ingresa con tu cuenta administradora</p>
+                    <p className="text-xs text-indigo-200/80">Introduce la clave de acceso para continuar</p>
                   </div>
 
                   <form 
@@ -191,10 +190,10 @@ export default function App() {
                       setSigningIn(true);
                       setAdminError('');
                       try {
-                        await loginAdmin(adminEmail, adminPassword);
+                        await loginAdmin(adminPassword);
                         setAdminPassword('');
-                      } catch {
-                        setAdminError('No se pudo iniciar sesión. Verifica tu cuenta y su permiso de administración.');
+                      } catch (err: any) {
+                        setAdminError(err?.message || 'Clave de acceso incorrecta. Verifica e intenta nuevamente.');
                       } finally {
                         setSigningIn(false);
                       }
@@ -208,12 +207,6 @@ export default function App() {
                       </div>
                     )}
 
-                    <div className="space-y-1.5">
-                      <label htmlFor="admin-email" className="block text-xs font-bold text-slate-500">Correo electrónico</label>
-                      <input id="admin-email" type="email" required autoComplete="username"
-                        value={adminEmail} onChange={e => setAdminEmail(e.target.value)}
-                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200" />
-                    </div>
                     <div className="space-y-1.5">
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Clave de Acceso</label>
                       <input

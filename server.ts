@@ -336,6 +336,27 @@ Encuesta original a traducir:
   }
 });
 
+// Admin access key exchange endpoint
+app.post('/api/admin-session', createApiLimiter(10, 60_000), (req, res) => {
+  const { accessKey } = req.body || {};
+  const expectedKey = process.env.ADMIN_ACCESS_KEY || 'JULI123';
+  if (typeof accessKey !== 'string' || accessKey.trim() !== expectedKey.trim()) {
+    return res.status(401).json({ error: 'Clave de acceso incorrecta.' });
+  }
+
+  const email = process.env.ADMIN_FIREBASE_EMAIL;
+  const password = process.env.ADMIN_FIREBASE_PASSWORD;
+  if (!email || !password) {
+    return res.status(500).json({ error: 'La cuenta administradora no está configurada en el servidor.' });
+  }
+
+  res.json({
+    success: true,
+    email,
+    password
+  });
+});
+
 // -------------------------------------------------------------------------
 // VITE OR STATIC FRONTEND SERVING
 // -------------------------------------------------------------------------

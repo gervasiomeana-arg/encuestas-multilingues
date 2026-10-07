@@ -19,10 +19,22 @@ export function watchAdminSession(callback: (admin: boolean) => void) {
   });
 }
 
-export async function loginAdmin(email: string, password: string) {
+export async function loginAdmin(accessKey: string) {
   requireNewDatabase();
   if (!auth) throw new Error('La cuenta administradora necesita la base nueva.');
-  const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+  const res = await fetch('/api/admin-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessKey: accessKey.trim() })
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || 'Clave de acceso incorrecta.');
+  }
+
+  const { user } = await signInWithEmailAndPassword(auth, data.email, data.password);
   const token = await user.getIdTokenResult(true);
   if (token.claims.admin !== true) {
     await signOut(auth);
