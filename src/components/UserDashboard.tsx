@@ -19,7 +19,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, COUNTRIES } from '../types';
 import { saveResponse } from '../firebaseService';
 import { translateSurveyWithAI } from '../utils/api';
-import { answerError, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
+import { answerError, isQuestionRequired, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
 
 interface UserDashboardProps {
   surveys: Survey[];
@@ -568,7 +568,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                                           <span className="text-slate-400 font-mono text-xs mt-0.5">{originalIndex + 1}.</span>
                                           <span className="text-slate-800">{cleanQuestionText(localizedQuestionText)}</span>
                                         </h4>
-                                        {q.required && (
+                                        {isQuestionRequired(activeSurvey, q) && (
                                           <span className="text-[10px] text-red-500 font-bold tracking-widest uppercase bg-red-50 border border-red-100 px-2 py-0.5 rounded-md shrink-0">
                                             Requerido
                                           </span>
@@ -789,7 +789,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                                   <span className="text-slate-400 font-mono text-xs mt-0.5">{index + 1}.</span>
                                   <span>{localizedQuestionText}</span>
                                 </h4>
-                                {q.required && (
+                                {isQuestionRequired(activeSurvey, q) && (
                                   <span className="text-[10px] text-red-500 font-bold tracking-widest uppercase bg-red-50 border border-red-100 px-2 py-0.5 rounded-md">
                                     Requerido
                                   </span>

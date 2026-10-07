@@ -42,10 +42,18 @@ export function toggleChoices(survey: Survey, question: SurveyQuestion, current:
   return [...next, option];
 }
 
+// Form policy only: preserve the original definitions and historical records.
+export function isQuestionRequired(survey: Survey, question: SurveyQuestion): boolean {
+  const isSenegal = survey.id === 'survey_senegal' ||
+    survey.targetCountry?.trim().toLowerCase() === 'senegal' ||
+    survey.title.trim().toLowerCase() === 'senegal';
+  return !isSenegal && question.required;
+}
+
 export function answerError(survey: Survey, question: SurveyQuestion, value: unknown): string | null {
   const empty = value === undefined || value === null ||
     (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);
-  if (empty) return question.required ? 'Completa esta pregunta obligatoria.' : null;
+  if (empty) return isQuestionRequired(survey, question) ? 'Completa esta pregunta obligatoria.' : null;
   if (question.type === 'text') return typeof value === 'string' ? null : 'Escribe una respuesta de texto.';
   if (question.type === 'rating') return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10 ? null : 'Elige un puntaje entre 1 y 10.';
   if (question.type === 'boolean') return value === 'Sí' || value === 'No' ? null : 'Elige Sí o No.';
