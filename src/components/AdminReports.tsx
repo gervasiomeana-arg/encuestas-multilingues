@@ -1,3 +1,4 @@
+import { databaseStatus, assertCompleteBackup } from '../firebaseService';
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   BarChart, 
@@ -278,6 +279,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   };
 
   const handleExportBackupJSON = () => {
+    try { assertCompleteBackup(); } catch (error) { alert((error as Error).message); return; }
     if (surveys.length === 0 && responses.length === 0) {
       alert("Aún no hay información registrada para respaldar.");
       return;
@@ -285,7 +287,8 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     const jsonStr = JSON.stringify({
       format: 'survey-backup', version: 1, exportedAt: new Date().toISOString(),
       counts: { surveys: surveys.length, responses: responses.length },
-      surveys, responses
+      surveys, responses,
+      sources: databaseStatus().origins
     }, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1407,7 +1410,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                         <td className="p-3 max-w-xs truncate font-semibold text-slate-800" title={relatedSurveyTitle}>
                           {relatedSurveyTitle}
                         </td>
-                        <td className="p-3 text-slate-600 font-semibold">{res.userName || 'Anónimo'}</td>
+                        <td className="p-3 text-slate-600 font-semibold">{res.userName || 'Anónimo'} <span className="block text-xs text-slate-400">Origen: {databaseStatus().origins.responses[res.id] || 'sin confirmar'}</span></td>
                         <td className="p-3">
                           <span className="bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-bold uppercase text-[9px] font-mono">
                             {activeLangName}

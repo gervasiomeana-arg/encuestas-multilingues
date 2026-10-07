@@ -59,12 +59,9 @@ test('backup CLI only reads files and prints counts and hashes without private c
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('installed Firebase CLI resolves production rules only to the named original database', () => {
+test('production template cannot target the historical database before new configuration', () => {
   const configuration = JSON.parse(readFileSync('firebase.production.json', 'utf8'));
-  const require = createRequire(import.meta.url);
-  const { getFirestoreConfig } = require('firebase-tools/lib/firestore/fsConfig.js');
-  const configs = getFirestoreConfig('chromatic-pride-0ttsj', { config: { src: configuration },
-    only: 'firestore:ai-studio-f947253c-4469-4545-9268-02ec4d0ccde0' });
-  assert.deepEqual(configs, [{ database: 'ai-studio-f947253c-4469-4545-9268-02ec4d0ccde0', rules: 'firestore.rules' }]);
-  assert.equal(Object.keys(configuration).length, 1);
+  assert.equal(configuration.firestore[0].database, 'REPLACE_WITH_NEW_DATABASE_ID');
+  assert.equal(configuration.firestore[0].rules, 'firestore.rules');
+  assert.doesNotMatch(JSON.stringify(configuration), /ai-studio-f947253c|chromatic-pride/);
 });

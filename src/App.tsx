@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { getAllSurveys, getAllResponses } from './firebaseService';
+import { getAllSurveys, getAllResponses, databaseStatus, prepareHistoricalSurveys } from './firebaseService';
 import { Survey, SurveyResponse } from './types';
 import { loginAdmin, logoutAdmin, watchAdminSession } from './authService';
 import Header from './components/Header';
@@ -44,6 +44,10 @@ export default function App() {
   const [isAnsweringSurvey, setIsAnsweringSurvey] = useState(false);
 
   const [loadError, setLoadError] = useState('');
+  const [preparing, setPreparing] = useState(false);
+  const prepareInFlight = useRef(false);
+  const [prepareMessage, setPrepareMessage] = useState('');
+  const storage = databaseStatus();
   const syncGeneration = useRef(0);
   const syncData = useCallback(async () => {
     const generation = ++syncGeneration.current;
@@ -58,9 +62,9 @@ export default function App() {
       if (generation !== syncGeneration.current) return;
       setSurveys(allSurveys);
       setResponses(allResponses);
-    } catch {
+    } catch (error) {
       if (generation === syncGeneration.current) {
-        setLoadError('No se pudo cargar la información. Tus datos guardados no se han modificado.');
+        setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la información.');
       }
     } finally {
       if (generation === syncGeneration.current) setLoading(false);
@@ -92,6 +96,8 @@ export default function App() {
       </div>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8" id="scrolling-main-wrapper">
+        {!storage.configured && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900">{storage.connectionError || 'Estamos preparando el sistema de guardado. Los nuevos envíos aún no están habilitados.'}</div>}
+        {storage.warnings.length > 0 && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900">No se pudo consultar toda la información histórica. Los totales son parciales. <button className="underline" onClick={syncData}>Reintentar</button></div>}
         {loadError ? (
           <div role="alert" className="bg-rose-50 border border-rose-200 rounded-xl p-6 text-rose-800">
             <p>{loadError}</p>
@@ -271,6 +277,18 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2">
+                    <p>Historial antiguo en modo lectura. Todas las encuestas y respuestas nuevas se guardan en la base nueva.</p>
+                    <p>Respuestas por origen: históricas {Object.values(storage.origins.responses).filter(o => o === 'histórica').length}, nuevas {Object.values(storage.origins.responses).filter(o => o === 'nueva').length}, coincidentes en ambas {Object.values(storage.origins.responses).filter(o => o === 'ambas').length}.</p>
+                    <button disabled={preparing || !storage.configured} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50" onClick={async () => {
+                      if (prepareInFlight.current) return;
+                      prepareInFlight.current = true; setPreparing(true); setPrepareMessage('');
+                      try { const count = await prepareHistoricalSurveys(); setPrepareMessage(`Se prepararon ${count} encuestas nuevas en la base nueva. No se copiaron respuestas ni se modificó el historial.`); await syncData(); }
+                      catch (error) { setPrepareMessage(error instanceof Error ? error.message : 'No se pudo preparar.'); }
+                      finally { prepareInFlight.current = false; setPreparing(false); }
+                    }}>{preparing ? 'Preparando…' : 'Habilitar nuevos envíos para encuestas históricas'}</button>
+                    {prepareMessage && <p role="status">{prepareMessage}</p>}
+                  </div>
                   {/* Sub Tab Navigation Selection */}
                   <div className="no-print flex flex-col sm:flex-row border-b border-slate-200">
                     <button

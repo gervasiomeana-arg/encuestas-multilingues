@@ -18,11 +18,12 @@ dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-// Must match the EXISTING project in src/firebase.ts. Do not use the remix config.
-const adminApp = getApps().find(app => app.name === 'survey-auth') || initializeApp({
-  projectId: process.env.FIREBASE_PROJECT_ID || 'chromatic-pride-0ttsj'
-}, 'survey-auth');
+// Authentication belongs exclusively to the new project; no fallback to historical credentials.
+const projectId = process.env.FIREBASE_PROJECT_ID;
+const adminApp = projectId && projectId !== 'chromatic-pride-0ttsj'
+  ? getApps().find(app => app.name === 'survey-auth') || initializeApp({ projectId }, 'survey-auth') : null;
 const adminOnly = requireAdministrator(async token => {
+  if (!adminApp) throw new Error('New administrator project is not configured');
   const claims = await getAuth(adminApp).verifyIdToken(token);
   return { admin: claims.admin };
 });
