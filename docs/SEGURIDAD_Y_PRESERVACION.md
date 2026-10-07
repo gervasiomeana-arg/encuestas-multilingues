@@ -223,3 +223,38 @@ Esto comprueba los archivos aportados, no la integridad de la base ni la posibil
 de restaurarla. La instantánea descargada por la app no garantiza un corte atómico
 entre colecciones. Aún se necesita un respaldo de infraestructura comprobado y
 acceso al administrador real, antes de coordinar la activación.
+
+## Cierre de revisión y orden de actualización
+
+La rama incorpora el cambio de nombre de `main` a ENCUESTAS MULTILINGÜES,
+conservando la adaptación a celular. No requiere modificar documentos guardados.
+
+El 6 de octubre se verificaron offline cuatro JSON descargados desde la app
+anterior: 190 respuestas de Mali, 160 de Sáhara Occidental, 8 de Mauritania y
+1 de Diáspora. Suman 359 identificadores únicos. Esos archivos contienen respuestas,
+no las seis definiciones de encuestas, y no se incorporan al repositorio por incluir
+información real. No acreditan que no existan respuestas en una versión anterior.
+La diferencia frente a las 34 de Mauritania recordadas por la usuaria sigue sin
+explicación comprobada; no se deben reconstruir ni inventar registros.
+
+Orden acordado:
+
+1. Terminar y revisar el código en esta rama, sin fusionar ni desplegar automáticamente.
+2. Obtener una exportación de las seis encuestas desde la conexión original;
+   preservar también los cuatro archivos de respuestas ya descargados.
+3. Confirmar acceso al proyecto original, Authentication Email/Password, UID
+   administrador con claim `admin: true` y credenciales del servidor para verificar
+   tokens. Una publicación de código por sí sola no prepara esos permisos.
+4. Actualizar el repositorio y publicar app y reglas de forma coordinada, conforme
+   a la sección de configuración. Mantener los mismos proyecto, base e IDs.
+5. Comprobar con la cuenta final que hay 6 encuestas y 359 respuestas, descargar
+   el respaldo integral de la nueva app y comparar las 359 respuestas con los
+   archivos previos, sin cambiar ningún registro.
+6. Compartir el enlace vigente de Mauritania con la clienta. Identificar las ocho
+   respuestas ya presentes antes de cargar únicamente las 26 faltantes.
+7. Descargar un respaldo nuevo. Si no hubo otros envíos, esperar 34 respuestas
+   de Mauritania y 385 respuestas totales. Conservar intactas las 359 anteriores.
+
+La revisión de código y las pruebas aisladas no sustituyen las comprobaciones
+finales de cuenta, configuración y conservación de producción. No se ha dado
+por verificado ningún requisito al que no se tuvo acceso.

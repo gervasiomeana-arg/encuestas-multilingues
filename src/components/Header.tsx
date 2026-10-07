@@ -20,7 +20,7 @@ export default function Header({ viewMode, onChangeViewMode, totalSurveys, total
             </div>
             <div className="min-w-0">
               <h1 className="text-base lg:text-xl font-black font-display text-slate-800 tracking-tight flex flex-wrap items-center gap-x-1.5 gap-y-1 leading-tight">
-                ENCUESTA PARA <span className="text-indigo-600">MAURITANIA</span>
+                ENCUESTAS <span className="text-indigo-600">MULTILINGÜES</span>
               </h1>
               <p className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider mt-0.5">Formato Dinámico por Bloques</p>
               <p className="text-[8px] text-indigo-500 font-mono font-semibold tracking-wider uppercase mt-px">created by cm</p>
