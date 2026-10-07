@@ -6,16 +6,42 @@ import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import * as pdf from "pdf-parse";
+import { getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { requireAdministrator, createApiLimiter, apiErrorHandler } from './serverSecurity';
+import { parseRawTextToSurveyVerbatim } from './src/utils/surveyParser';
+import { validSurveyDraft, validTranslationRequest } from './src/utils/apiValidation';
+import { translationCoverage } from './src/utils/surveyValidation';
+import { NEW_FIREBASE_ENV } from './src/newFirebaseConfig';
 
 // Ensure environment variables are loaded in local developer environment
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
+// Authentication belongs exclusively to the new project; no fallback to historical credentials.
+const projectId = process.env.FIREBASE_PROJECT_ID ?? NEW_FIREBASE_ENV.VITE_NEW_FIREBASE_PROJECT_ID;
+const adminApp = projectId && projectId !== 'chromatic-pride-0ttsj'
+  ? getApps().find(app => app.name === 'survey-auth') || initializeApp({ projectId }, 'survey-auth') : null;
+const adminOnly = requireAdministrator(async token => {
+  if (!adminApp) throw new Error('New administrator project is not configured');
+  const claims = await getAuth(adminApp).verifyIdToken(token);
+  return { admin: claims.admin };
+});
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+app.use(['/api/parse-survey', '/api/translate-survey'], createApiLimiter());
+app.use('/api/parse-survey', adminOnly);
 
 // Body parser middlewares
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "256kb" }));
+app.use(express.urlencoded({ extended: true, limit: "256kb" }));
 
 // Configure Multer to intercept files in memory
 const upload = multer({
@@ -54,12 +80,12 @@ async function generateContentWithRetry(
     } catch (error: any) {
       attempt++;
       const errMessage = error instanceof Error ? error.message : String(error);
-      const isTransient = 
-        errMessage.includes("503") || 
-        errMessage.includes("UNAVAILABLE") || 
-        errMessage.includes("high demand") || 
+      const isTransient =
+        errMessage.includes("503") ||
+        errMessage.includes("UNAVAILABLE") ||
+        errMessage.includes("high demand") ||
         errMessage.includes("temporary") ||
-        errMessage.includes("429") || 
+        errMessage.includes("429") ||
         errMessage.includes("RESOURCE_EXHAUSTED") ||
         (error?.status && [429, 503].includes(error.status));
 
@@ -85,138 +111,21 @@ async function generateContentWithRetry(
 function getFriendlyAIErrorMessage(error: any): string {
   const errStr = error instanceof Error ? error.message : String(error);
   if (
-    errStr.includes("503") || 
-    errStr.includes("UNAVAILABLE") || 
-    errStr.includes("high demand") || 
+    errStr.includes("503") ||
+    errStr.includes("UNAVAILABLE") ||
+    errStr.includes("high demand") ||
     errStr.includes("temporary")
   ) {
     return "El servidor de Inteligencia Artificial (Gemini) está experimentando una demanda extremadamente alta en este momento (Error 503). Por favor, intenta de nuevo en unos segundos. Por lo general, el servicio se restablece de inmediato.";
   }
   if (
-    errStr.includes("429") || 
-    errStr.includes("RESOURCE_EXHAUSTED") || 
+    errStr.includes("429") ||
+    errStr.includes("RESOURCE_EXHAUSTED") ||
     errStr.includes("quota")
   ) {
     return "Se ha superado temporalmente el límite de consultas permitidas a la IA (Error 429). Por favor, intenta de nuevo en unos momentos.";
   }
-  return `Error de la IA: ${errStr}`;
-}
-
-/**
- * Parses raw text extracted from a document into a structured survey JSON verbatim (verbatim/literal offline copy)
- */
-function parseRawTextToSurveyVerbatim(text: string, filename: string) {
-  const rawLines = text.split(/\r?\n/).map(l => l.trim());
-  const lines = rawLines.filter(l => l.length > 0);
-
-  if (lines.length === 0) {
-    const cleanFilename = filename.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-    return {
-      title: cleanFilename,
-      description: "Encuesta importada directamente del archivo original.",
-      questions: []
-    };
-  }
-
-  // Find a good title and description
-  let title = lines[0];
-  let description = "Encuesta importada directamente del archivo original (Modo copia literal sin IA).";
-  let startIndex = 1;
-
-  if (title.length > 100) {
-    title = filename.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-    description = lines[0];
-    startIndex = 1;
-  } else if (lines.length > 1) {
-    const secondLine = lines[1];
-    const isQuestion = secondLine.endsWith("?") || secondLine.includes("¿") || /^\d+[\.\)]/.test(secondLine);
-    const isOption = /^[\s\d\w\)\.\-\*•\[\]]+$/.test(secondLine) && secondLine.length < 50 && (secondLine.startsWith("-") || secondLine.startsWith("*") || /^[a-gA-G][\)\.]/.test(secondLine));
-    if (!isQuestion && !isOption && secondLine.length > 10) {
-      description = secondLine;
-      startIndex = 2;
-    }
-  }
-
-  // Clean title from common labels
-  title = title.replace(/^(t[ií]tulo|title|encuesta|survey|evaluaci[oó]n):\s*/i, "").trim();
-
-  const questions: any[] = [];
-  let currentQuestion: any = null;
-
-  for (let i = startIndex; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Detect if this line represents an option of the previous question
-    const isBulletOption = /^[•\-\*\+]\s*(.+)$/.test(line);
-    const isCheckboxOption = /^\[\s*x?\s*\]\s*(.+)$/i.test(line) || /^\(\s*x?\s*\)\s*(.+)$/i.test(line);
-    const isIndexOption = /^[a-gA-G0-9]+\s*[\)\.\-]\s*(.+)$/.test(line);
-
-    const isOption = (isBulletOption || isCheckboxOption || isIndexOption) && currentQuestion && line.length < 200;
-
-    if (isOption) {
-      if (currentQuestion.type === "text") {
-        currentQuestion.type = "single_choice";
-      }
-      if (!currentQuestion.options) {
-        currentQuestion.options = [];
-      }
-      
-      let optionText = line;
-      if (isBulletOption) {
-        optionText = line.replace(/^[•\-\*\+]\s*/, "");
-      } else if (isCheckboxOption) {
-        optionText = line.replace(/^\[\s*x?\s*\]\s*/i, "").replace(/^\(\s*x?\s*\)\s*/i, "");
-      } else if (isIndexOption) {
-        optionText = line.replace(/^[a-gA-G0-9]+\s*[\)\.\-]\s*/, "");
-      }
-
-      currentQuestion.options.push(optionText.trim());
-    } else {
-      // Treat this line as a new question!
-      if (currentQuestion) {
-        questions.push(currentQuestion);
-      }
-
-      let type: "text" | "rating" | "boolean" | "single_choice" = "text";
-      const lineLower = line.toLowerCase();
-      
-      if (
-        lineLower.includes("sí o no") || 
-        lineLower.includes("si o no") || 
-        lineLower.includes("verdadero o falso") ||
-        lineLower.includes("(si/no)") ||
-        lineLower.includes("(sí/no)")
-      ) {
-        type = "boolean";
-      } else if (
-        lineLower.includes("escala del") || 
-        lineLower.includes("escala de 1") || 
-        lineLower.includes("(1 al") || 
-        lineLower.includes("(1-5)") || 
-        lineLower.includes("(1-10)")
-      ) {
-        type = "rating";
-      }
-
-      currentQuestion = {
-        id: `q_parsed_${Date.now()}_${questions.length}_${Math.random().toString(36).substr(2, 4)}`,
-        text: line,
-        type,
-        options: [],
-        required: true
-      };
-    }
-  }
-
-  if (currentQuestion) {
-    questions.push(currentQuestion);
-  }
-
-  return {
-    title,
-    description,
-    questions
-  };
+  return "No se pudo completar la operación. Reintenta más tarde.";
 }
 
 // -------------------------------------------------------------------------
@@ -243,8 +152,8 @@ app.post("/api/parse-survey", upload.single("file"), async (req, res) => {
     if (mimetype === "application/pdf") {
       try {
         const parser = new pdf.PDFParse({ data: req.file.buffer });
-        const parsedPdf = await parser.getText();
-        extractedText = parsedPdf.text;
+        try { extractedText = (await parser.getText()).text; }
+        finally { await parser.destroy(); }
       } catch (pdfErr: any) {
         throw new Error(`Error al procesar el archivo PDF: ${pdfErr.message}`);
       }
@@ -259,7 +168,9 @@ app.post("/api/parse-survey", upload.single("file"), async (req, res) => {
         throw new Error(`Error al procesar el archivo de Word (.docx): ${docErr.message}`);
       }
     } else {
-      // Fallback as plain text if it looks like any text file
+      if (!filename.toLowerCase().endsWith('.txt')) {
+        res.status(400).json({ error: 'Solo se admiten PDF, DOCX o TXT.' }); return;
+      }
       extractedText = req.file.buffer.toString("utf8");
     }
 
@@ -268,12 +179,15 @@ app.post("/api/parse-survey", upload.single("file"), async (req, res) => {
       return;
     }
 
+    if (extractedText.length > 200_000) {
+      res.status(413).json({ error: 'El documento contiene demasiado texto. Divídelo antes de importarlo.' }); return;
+    }
     const useAI = req.body.useAI !== "false" && req.query.useAI !== "false";
 
     if (!useAI) {
       console.log(`Bypassing Gemini AI parsing as requested. Extracting text verbatim for: ${filename}`);
       const parsedSurvey = parseRawTextToSurveyVerbatim(extractedText, filename);
-      res.json({ success: true, survey: parsedSurvey });
+      res.json({ success: true, survey: parsedSurvey, warnings: parsedSurvey.warnings });
       return;
     }
 
@@ -320,7 +234,7 @@ ${extractedText}
     });
 
     let resultText = response.text || "";
-    
+
     // Clean up codeblock if Gemini returns it decorated
     if (resultText.includes("```json")) {
       resultText = resultText.substring(resultText.indexOf("```json") + 7);
@@ -329,15 +243,16 @@ ${extractedText}
       resultText = resultText.substring(resultText.indexOf("```") + 3);
       resultText = resultText.substring(0, resultText.lastIndexOf("```"));
     }
-    
+
     try {
       const parsedSurvey = JSON.parse(resultText.trim());
+      if (!validSurveyDraft(parsedSurvey)) throw new Error('Invalid survey schema');
       res.json({ success: true, survey: parsedSurvey });
     } catch (jsonErr) {
-      console.error("Error al analizar el formato JSON devuelto por Gemini:", resultText);
-      res.status(500).json({ 
+      console.error("La IA devolvió un formato de encuesta inválido.");
+      res.status(500).json({
         error: "La IA no pudo estructurar el contenido en un formato JSON válido.",
-        rawResponse: resultText 
+        // Raw AI content is not included in public error responses.
       });
     }
   } catch (err: any) {
@@ -350,7 +265,7 @@ ${extractedText}
 app.post("/api/translate-survey", async (req, res) => {
   try {
     const { survey, targetLanguageCode, targetLanguageName } = req.body;
-    if (!survey || !targetLanguageCode || !targetLanguageName) {
+    if (!validTranslationRequest(survey, targetLanguageCode, targetLanguageName)) {
       res.status(400).json({ error: "Faltan parámetros de encuesta o idioma para traducir." });
       return;
     }
@@ -393,7 +308,7 @@ Encuesta original a traducir:
     });
 
     let resultText = response.text || "";
-    
+
     if (resultText.includes("```json")) {
       resultText = resultText.substring(resultText.indexOf("```json") + 7);
       resultText = resultText.substring(0, resultText.lastIndexOf("```"));
@@ -404,12 +319,15 @@ Encuesta original a traducir:
 
     try {
       const parsedTranslation = JSON.parse(resultText.trim());
+      if (!translationCoverage(survey, parsedTranslation).complete ||
+          typeof parsedTranslation.title !== 'string' || !parsedTranslation.title.trim() ||
+          typeof parsedTranslation.description !== 'string') throw new Error('Incomplete translation');
       res.json({ success: true, translation: parsedTranslation });
     } catch (jsonErr) {
-      console.error("Error al analizar el formato JSON de traducción:", resultText);
-      res.status(500).json({ 
-        error: "La IA no pudo formatear la traducción como un JSON válido.", 
-        rawResponse: resultText 
+      console.error("La IA devolvió un formato de traducción inválido.");
+      res.status(500).json({
+        error: "La IA no pudo formatear la traducción como un JSON válido.",
+        // Raw AI content is not included in public error responses.
       });
     }
   } catch (err: any) {
@@ -421,6 +339,11 @@ Encuesta original a traducir:
 // -------------------------------------------------------------------------
 // VITE OR STATIC FRONTEND SERVING
 // -------------------------------------------------------------------------
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'La función solicitada no existe.' });
+});
+app.use(apiErrorHandler);
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     // Development mode: mount Vite dev middleware
@@ -431,7 +354,11 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     // Production mode: serve built client assets from /dist
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(process.cwd(), "dist", "client");
+    app.use((req, res, next) => {
+      if (/\.(?:cjs|map)$/.test(req.path)) { res.sendStatus(404); return; }
+      next();
+    });
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

@@ -1,14 +1,39 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow anyone to read and write to the surveys collection
-    match /surveys/{surveyId} {
-      allow read, write: if true;
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
     }
-    
-    // Allow anyone to read and write to the responses collection
+    match /surveys/{surveyId} {
+      allow read: if true;
+      allow create: if isAdmin()
+        && request.resource.data.id == surveyId
+        && request.resource.data.questions is list
+        && request.resource.data.questions.size() > 0;
+      // Existing questionnaires cannot be changed, including by administrators.
+      allow update, delete: if false;
+    }
     match /responses/{responseId} {
-      allow read, write: if true;
+      allow read: if isAdmin();
+      allow create: if request.resource.data.keys().hasAll([
+          'id', 'surveyId', 'userName', 'userLanguage', 'answers', 'submittedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'id', 'surveyId', 'userName', 'userLanguage', 'userCountry', 'answers', 'submittedAt'
+        ])
+        && request.resource.data.id == responseId
+        && request.resource.data.surveyId is string
+        && exists(/databases/$(database)/documents/surveys/$(request.resource.data.surveyId))
+        && request.resource.data.answers is map
+        && request.resource.data.answers.size() > 0
+        && request.resource.data.answers.size() <= 250
+        && request.resource.data.userName is string
+        && request.resource.data.userName.size() <= 200
+        && request.resource.data.userLanguage is string
+        && request.resource.data.userLanguage.size() <= 20
+        && (!('userCountry' in request.resource.data) || request.resource.data.userCountry is string)
+        && request.resource.data.submittedAt is string;
+      allow update, delete: if false;
     }
   }
 }

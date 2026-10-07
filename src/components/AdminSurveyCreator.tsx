@@ -18,7 +18,9 @@ import {
   ArrowDown
 } from 'lucide-react';
 import { Survey, SurveyQuestion, QuestionType, COUNTRIES, AVAILABLE_LANGUAGES, TranslationData } from '../types';
-import { saveSurvey, getAllSurveys, deleteSurvey } from '../firebaseService';
+import { saveSurvey } from '../firebaseService';
+import { validQuestions, validSurveyDraft } from '../utils/apiValidation';
+import { translationCoverage } from '../utils/surveyValidation';
 import { uploadAndParseSurveyFile, translateSurveyWithAI } from '../utils/api';
 
 interface AdminSurveyCreatorProps {
@@ -56,12 +58,14 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   // Parsing file uploaded status
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+  const [fileUploadNotice, setFileUploadNotice] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [useAIForParsing, setUseAIForParsing] = useState(true);
 
   // Save survey status
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -102,6 +106,8 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
 
   // Upload and parse file via Express backend with Gemini AI
   const handleFileParsing = async (file: File) => {
+    setFileUploadError(null);
+    setFileUploadNotice(null);
     const filename = file.name.toLowerCase();
     if (
       !filename.endsWith('.pdf') && 
@@ -116,6 +122,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
     try {
       const response = await uploadAndParseSurveyFile(file, useAIForParsing);
       if (response.success && response.survey) {
+        if (!validQuestions(response.survey.questions)) throw new Error("El documento produjo preguntas inválidas o repetidas. Revisa el archivo antes de crear la encuesta.");
         setTitle(response.survey.title);
         setDescription(response.survey.description);
         
@@ -129,6 +136,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         }));
         
         setQuestions(mappedQuestions);
+        setFileUploadNotice(response.warnings?.join(' ') || 'Revisa las preguntas y opciones extraídas antes de guardar una encuesta nueva.');
       } else {
         setFileUploadError(response.error || "No se pudo extraer el formato de encuesta de este documento.");
       }
@@ -205,8 +213,9 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   };
 
   // Save the constructed survey draft in Firestore
-  const handleSaveSurvey = async (e: React.FormEvent, forceNewId?: boolean) => {
+  const handleSaveSurvey = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (saveInFlight.current) return;
     setErrorMessage(null);
 
     // Validation
@@ -233,11 +242,20 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
       }
     }
 
+    if (!validQuestions(questions)) {
+      setErrorMessage('Revisa los IDs, tipos y opciones: hay preguntas inválidas o repetidas.');
+      return;
+    }
+    if (!validSurveyDraft({ title, description, questions })) {
+      setErrorMessage('Revisa el título y la descripción: superan la longitud permitida.');
+      return;
+    }
+    saveInFlight.current = true;
     setSaving(true);
+    let saved = false;
 
     try {
-      const isUpdating = initialSurvey && !forceNewId;
-      const surveyId = isUpdating ? initialSurvey.id : `survey_${Date.now()}`;
+      const surveyId = `survey_${crypto.randomUUID()}`;
       
       const surveyData: Survey = {
         id: surveyId,
@@ -246,8 +264,8 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         questions,
         targetCountry,
         targetLanguage: activeCountryInfo.nativeLanguage.code,
-        translations: isUpdating ? { ...initialSurvey.translations } : {},
-        createdAt: isUpdating ? initialSurvey.createdAt : new Date().toISOString(),
+        translations: {},
+        createdAt: new Date().toISOString(),
         createdBy: "administrador"
       };
 
@@ -258,15 +276,15 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
           activeCountryInfo.nativeLanguage.code, 
           activeCountryInfo.nativeLanguage.name
         );
-        if (translateResult.success && translateResult.translation) {
+        if (translateResult.success && translateResult.translation && translationCoverage(surveyData, translateResult.translation).complete) {
           surveyData.translations[activeCountryInfo.nativeLanguage.code] = translateResult.translation;
         } else {
-          console.warn("Auto-translation issue:", translateResult.error);
-          // Don't crash entirely, save draft anyway but alert admin
+          throw new Error('No se guardó la encuesta porque no se completó la traducción solicitada. Reintenta o desactiva la traducción automática para guardar solo el original.');
         }
       }
 
       await saveSurvey(surveyData);
+      saved = true;
       setSaveSuccess(true);
       
       // Reset variables
@@ -275,6 +293,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         setDescription('');
         setQuestions([]);
         setSaveSuccess(false);
+        saveInFlight.current = false;
         if (onClearEdit) onClearEdit();
         onSurveyCreated(); // Notify parent of update
       }, 2000);
@@ -282,6 +301,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
     } catch (err: any) {
       setErrorMessage(err.message || "No se pudo guardar la encuesta.");
     } finally {
+      if (!saved) saveInFlight.current = false;
       setSaving(false);
     }
   };
@@ -289,54 +309,9 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
   return (
     <div className="space-y-6" id="survey-creator-workflow">
       
-      {/* QUICK ACTIONS BANNER */}
-      <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-5 rounded-3xl text-white shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <span className="bg-white/15 text-emerald-100 text-[9px] font-bold uppercase tracking-widest px-2.5 py-0.5 rounded-full border border-white/20 font-mono">
-              Acceso Rápido Oficial
-            </span>
-          </div>
-          <h4 className="text-sm font-bold font-display uppercase tracking-wider mt-1">Cargar Encuesta Mauritania Perfecta (Verbatim)</h4>
-          <p className="text-[11px] text-emerald-100/90 max-w-xl">
-            Corrige y reestablece al instante la encuesta 100% fiel al documento original de Word de 42 preguntas distribuidas en los 8 Bloques, con traducciones incluidas.
-          </p>
-        </div>
-        <button
-          onClick={async () => {
-            if (confirm("Se eliminará la versión actual de la Encuesta de Mauritania y se reemplazará por la versión 100% exacta del archivo Word. ¿Deseas continuar?")) {
-              setSaving(true);
-              try {
-                const { MAURITANIA_SURVEY } = await import('../utils/mauritaniaDefaultSurvey');
-                const allSurveys = await getAllSurveys();
-                const mauritaniaSurveys = allSurveys.filter(s => s.targetCountry === 'Mauritania' || s.title.includes('MAURITANIA'));
-                for (const oldSurvey of mauritaniaSurveys) {
-                  await deleteSurvey(oldSurvey.id);
-                }
-                await saveSurvey(MAURITANIA_SURVEY);
-                setSaveSuccess(true);
-                setTimeout(() => {
-                  setSaveSuccess(false);
-                  onSurveyCreated();
-                }, 1500);
-              } catch (e: any) {
-                setErrorMessage(e.message || "Error al restablecer la encuesta.");
-              } finally {
-                setSaving(false);
-              }
-            }
-          }}
-          disabled={saving}
-          className="bg-white hover:bg-emerald-50 text-emerald-800 text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm shrink-0 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-        >
-          {saving ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
-          ) : (
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-          )}
-          <span>Cargar Encuesta Oficial</span>
-        </button>
-      </div>
+      {initialSurvey && <p className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-800">
+        La encuesta original está protegida. Los cambios se guardarán en una copia nueva, sin alterar sus respuestas.
+      </p>}
 
       {/* SECTION 1: DOCUMENT PARSER CHANGER UPLOADER */}
       <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs">
@@ -379,7 +354,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
           {useAIForParsing ? (
             <span><b>Modo Inteligente (Gemini):</b> AI estructurará preguntas, deducirá tipos de respuestas (escala, texto, opción múltiple), pulirá títulos y creará la encuesta ideal. (Sujeto a disponibilidad del servicio de IA).</span>
           ) : (
-            <span><b>Modo Copia Literal Verbatim (Offline / Sin IA):</b> Sáltate la IA. El sistema extraerá de forma 100% estable y al instante el texto del documento al pie de la letra, preservando cada línea, opción y enunciado verbatim. Ideal si la IA experimenta demoras o alta demanda.</span>
+            <span><b>Modo Copia Literal Verbatim (Offline / Sin IA):</b> Sáltate la IA. El sistema propone una estructura a partir del texto extraído. Revisa la numeración, las preguntas y las opciones antes de guardar. Ideal si la IA experimenta demoras o alta demanda.</span>
           )}
         </p>
 
@@ -426,9 +401,14 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
         </div>
 
         {fileUploadError && (
-          <div className="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs flex items-center gap-2">
+          <div role="alert" className="mt-3 bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
             <span>{fileUploadError}</span>
+          </div>
+        )}
+        {fileUploadNotice && (
+          <div role="status" className="mt-3 bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs">
+            Documento cargado. {fileUploadNotice}
           </div>
         )}
       </section>
@@ -447,7 +427,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
                 Modo Edición / Duplicación Activo
               </p>
               <p className="text-[11px] text-amber-700 mt-0.5 leading-relaxed">
-                Estás trabajando sobre la encuesta <strong className="font-semibold">"{initialSurvey.title}"</strong> ({initialSurvey.targetCountry}). Puedes modificar las preguntas, cambiar el país de destino (por ejemplo, a Senegal) y elegir guardarla como copia nueva o actualizar la existente.
+                Estás trabajando sobre la encuesta <strong className="font-semibold">"{initialSurvey.title}"</strong> ({initialSurvey.targetCountry}). Puedes modificar las preguntas, cambiar el país de destino (por ejemplo, a Senegal) y guardarla como copia nueva. La original y sus respuestas se conservan.
               </p>
             </div>
             <button
@@ -718,7 +698,7 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
                 <>
                   <button
                     type="button"
-                    onClick={(e) => handleSaveSurvey(e, true)}
+                    onClick={handleSaveSurvey}
                     disabled={saving}
                     className="bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs px-5 py-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs"
                     title="Crea una encuesta idéntica o editada en otro país con un nuevo enlace, sin alterar la original."
@@ -731,20 +711,6 @@ export default function AdminSurveyCreator({ onSurveyCreated, initialSurvey, onC
                     <span>Guardar como Copia Nueva (Duplicar)</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={(e) => handleSaveSurvey(e, false)}
-                    disabled={saving}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-5 py-3 rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shadow-xs shadow-indigo-100"
-                    title="Actualiza los textos o preguntas de la encuesta original manteniendo su ID y enlace activo."
-                  >
-                    {saving ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                    ) : (
-                      <Save className="w-3.5 h-3.5" />
-                    )}
-                    <span>Guardar Cambios (Actualizar Existente)</span>
-                  </button>
                 </>
               ) : (
                 <button

@@ -1,18 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  getAllSurveys, 
-  getAllResponses, 
-  saveSurvey,
-  saveMultipleResponses,
-  deleteSurvey
-} from './firebaseService';
-import { Survey, SurveyResponse, COUNTRIES } from './types';
-import { MAURITANIA_SURVEY, MAURITANIA_SURVEY_II } from './utils/mauritaniaDefaultSurvey';
-import { INITIAL_MAURITANIA_RESPONSES } from './utils/mauritaniaResponsesData';
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { getAllSurveys, getAllResponses, databaseStatus, prepareHistoricalSurveys } from './firebaseService';
+import { Survey, SurveyResponse } from './types';
+import { loginAdmin, logoutAdmin, watchAdminSession } from './authService';
 import Header from './components/Header';
 import UserDashboard from './components/UserDashboard';
-import AdminSurveyCreator from './components/AdminSurveyCreator';
-import AdminReports from './components/AdminReports';
+const AdminSurveyCreator = lazy(() => import('./components/AdminSurveyCreator'));
+const AdminReports = lazy(() => import('./components/AdminReports'));
 import { 
   Plus, 
   BarChart3, 
@@ -35,6 +28,8 @@ export default function App() {
 
   // Admin access validation states
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('');
+  const [signingIn, setSigningIn] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState('');
 
@@ -48,98 +43,44 @@ export default function App() {
   // State to track whether the user is answering a survey beyond step 0
   const [isAnsweringSurvey, setIsAnsweringSurvey] = useState(false);
 
-  // Load all datastores on component mount safely without destructive wipe
-  const syncData = async () => {
+  const [loadError, setLoadError] = useState('');
+  const [preparing, setPreparing] = useState(false);
+  const prepareInFlight = useRef(false);
+  const [prepareMessage, setPrepareMessage] = useState('');
+  const storage = databaseStatus();
+  const syncGeneration = useRef(0);
+  const syncData = useCallback(async () => {
+    const generation = ++syncGeneration.current;
+    setLoading(true);
+    setLoadError('');
     try {
-      const allSurveys = await getAllSurveys();
-      
-      // Ensure Mauritania Survey II (survey_mauritania_dos) exists in Firestore
-      const secondarySurvey = allSurveys.find(s => s.id === 'survey_mauritania_dos');
-      if (!secondarySurvey) {
-        console.log("Seeding Mauritania Survey II to Firestore...");
-        await saveSurvey(MAURITANIA_SURVEY_II);
-      }
-
-      // Reload fresh datasets from Firestore
-      const updatedSurveys = await getAllSurveys();
-      const allResponses = await getAllResponses();
-      setSurveys(updatedSurveys);
+      // Public sessions never fetch response documents. Opening the app never writes.
+      const [allSurveys, allResponses] = await Promise.all([
+        getAllSurveys(),
+        isAdminAuthenticated ? getAllResponses() : Promise.resolve([])
+      ]);
+      if (generation !== syncGeneration.current) return;
+      setSurveys(allSurveys);
       setResponses(allResponses);
     } catch (error) {
-      console.error("Error synchronizing active datasets:", error);
+      if (generation === syncGeneration.current) {
+        setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la información.');
+      }
     } finally {
-      setLoading(false);
+      if (generation === syncGeneration.current) setLoading(false);
     }
-  };
+  }, [isAdminAuthenticated]);
+
+  useEffect(() => watchAdminSession(admin => {
+    ++syncGeneration.current;
+    setResponses([]);
+    setIsAdminAuthenticated(admin);
+  }), []);
 
   useEffect(() => {
     syncData();
-  }, []);
-
-  // Quick action to seed demo surveys if database is empty on start
-  const handleSeedMockSurveys = async () => {
-    setLoading(true);
-    try {
-      const mockSurvey: Survey = {
-        id: 'survey_seed_ciudadano',
-        title: 'Encuesta de Atención al Ciudadano',
-        description: 'Relevamiento sobre la calidad de atención y tiempos de espera en oficinas gubernamentales.',
-        targetCountry: 'Argentina',
-        targetLanguage: 'es',
-        createdAt: new Date().toISOString(),
-        createdBy: 'seeder',
-        questions: [
-          {
-            id: 'c1',
-            text: '¿Cómo calificaría la atención general recibida por nuestro personal?',
-            type: 'rating',
-            required: true
-          },
-          {
-            id: 'c2',
-            text: '¿Logró resolver su trámite o consulta en su primera visita?',
-            type: 'boolean',
-            required: true
-          },
-          {
-            id: 'c3',
-            text: '¿Qué canales de contacto prefiere utilizar habitualmente?',
-            type: 'multiple_choice',
-            options: ['Atención Presencial', 'Llamada Telefónica', 'Portal Web Oficial', 'Mensajería Whatsapp'],
-            required: false
-          },
-          {
-            id: 'c4',
-            text: 'Por favor, indíquenos alguna sugerencia para seguir mejorando nuestro portal.',
-            type: 'text',
-            required: true
-          }
-        ],
-        translations: {
-          en: {
-            title: 'Citizen Support Quality Survey',
-            description: 'Survey on service quality and waiting times in government offices.',
-            questions: {
-              c1: { text: 'How would you rate the overall support received by our staff?' },
-              c2: { text: 'Did you manage to resolve your procedure or inquiry on your first visit?' },
-              c3: { 
-                text: 'Which contact channels do you usually prefer to use?', 
-                options: ['In-person Attendance', 'Telephone Call', 'Official Web Portal', 'Whatsapp Messaging'] 
-              },
-              c4: { text: 'Please, write down any request or suggestion to keep improving our portal.' }
-            }
-          }
-        }
-      };
-
-      await saveSurvey(mockSurvey);
-      await syncData();
-    } catch (err) {
-      console.error("Error seeding mock items:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => { ++syncGeneration.current; };
+  }, [syncData]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans selection:bg-indigo-600 selection:text-white" id="root-viewport">
@@ -150,12 +91,19 @@ export default function App() {
           viewMode={viewMode}
           onChangeViewMode={(mode) => setViewMode(mode)}
           totalSurveys={surveys.length}
-          totalResponses={responses.length}
+          totalResponses={isAdminAuthenticated ? responses.length : undefined}
         />
       </div>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8" id="scrolling-main-wrapper">
-        {loading ? (
+        {!storage.configured && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900">{storage.connectionError || 'Estamos preparando el sistema de guardado. Los nuevos envíos aún no están habilitados.'}</div>}
+        {storage.warnings.length > 0 && <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-900">No se pudo consultar toda la información histórica. Los totales son parciales. <button className="underline" onClick={syncData}>Reintentar</button></div>}
+        {loadError ? (
+          <div role="alert" className="bg-rose-50 border border-rose-200 rounded-xl p-6 text-rose-800">
+            <p>{loadError}</p>
+            <button onClick={syncData} className="mt-3 underline font-semibold">Reintentar</button>
+          </div>
+        ) : loading ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-3">
             <div className="w-10 h-10 border-4 border-indigo-600/20 border-t-indigo-600 rounded-full animate-spin"></div>
             <p className="text-xs font-semibold text-slate-500">Sincronizando información con Firebase Cloud...</p>
@@ -185,7 +133,8 @@ export default function App() {
                 ? surveys.filter(s => s.id === urlId) 
                 : surveys;
 
-              const activeDisplayedSurveys = displayedSurveys.length > 0 ? displayedSurveys : surveys;
+              const activeDisplayedSurveys = displayedSurveys;
+              if (urlId && displayedSurveys.length === 0) return <p role="alert">La encuesta de este enlace no está disponible.</p>;
 
               return (
                 <div id="user-portal-panel" className="space-y-6">
@@ -209,7 +158,6 @@ export default function App() {
 
                   <UserDashboard 
                     surveys={activeDisplayedSurveys}
-                    onSurveySubmitted={syncData}
                     onActiveStateChange={setIsAnsweringSurvey}
                   />
                 </div>
@@ -225,20 +173,24 @@ export default function App() {
                       <Lock className="w-8 h-8 text-indigo-300" />
                     </div>
                     <h3 className="text-xl font-bold">Consola de Administración</h3>
-                    <p className="text-xs text-indigo-200/80">Ingresa la clave de acceso para continuar</p>
+                    <p className="text-xs text-indigo-200/80">Ingresa con tu cuenta administradora</p>
                   </div>
 
                   <form 
-                    onSubmit={(e) => {
+                    onSubmit={async (e) => {
                       e.preventDefault();
+                      if (signingIn) return;
+                      setSigningIn(true);
                       setAdminError('');
-                      if (adminPassword === 'JULI123') {
-                        setIsAdminAuthenticated(true);
+                      try {
+                        await loginAdmin(adminEmail, adminPassword);
                         setAdminPassword('');
-                      } else {
-                        setAdminError('Clave de acceso incorrecta');
+                      } catch {
+                        setAdminError('No se pudo iniciar sesión. Verifica tu cuenta y su permiso de administración.');
+                      } finally {
+                        setSigningIn(false);
                       }
-                    }} 
+                    }}
                     className="p-6 space-y-4"
                   >
                     {adminError && (
@@ -249,9 +201,17 @@ export default function App() {
                     )}
 
                     <div className="space-y-1.5">
+                      <label htmlFor="admin-email" className="block text-xs font-bold text-slate-500">Correo electrónico</label>
+                      <input id="admin-email" type="email" required autoComplete="username"
+                        value={adminEmail} onChange={e => setAdminEmail(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200" />
+                    </div>
+                    <div className="space-y-1.5">
                       <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Clave de Acceso</label>
                       <input
                         type="password"
+                        required
+                        autoComplete="current-password"
                         placeholder="••••••••••••"
                         value={adminPassword}
                         onChange={(e) => setAdminPassword(e.target.value)}
@@ -274,9 +234,10 @@ export default function App() {
                       </button>
                       <button
                         type="submit"
+                        disabled={signingIn}
                         className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs py-3 rounded-xl transition-all text-center cursor-pointer shadow-sm shadow-indigo-100"
                       >
-                        Ingresar
+                        {signingIn ? 'Ingresando…' : 'Ingresar'}
                       </button>
                     </div>
                   </form>
@@ -299,28 +260,37 @@ export default function App() {
 
                     <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                       <button
-                        onClick={() => setIsAdminAuthenticated(false)}
+                        onClick={async () => {
+                          ++syncGeneration.current;
+                          setResponses([]);
+                          setIsAdminAuthenticated(false);
+                          setEditingSurvey(null);
+                          try { await logoutAdmin(); } catch { setLoadError('No se pudo cerrar la sesión. Reintenta.'); }
+                        }}
                         className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-1.5 cursor-pointer"
                         title="Cerrar sesión de administrador"
                       >
                         <span>Cerrar Sesión</span>
                       </button>
                       
-                      {/* Seed Mock Action if Database gets fully wiped or is fresh empty */}
-                      {surveys.length === 0 && (
-                        <button
-                          onClick={handleSeedMockSurveys}
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all duration-150 flex items-center gap-1.5 cursor-pointer shadow-sm shadow-indigo-100"
-                        >
-                          <Zap className="w-3.5 h-3.5 shrink-0" />
-                          <span>Cargar Encuesta Ejemplo</span>
-                        </button>
-                      )}
+
                     </div>
                   </div>
 
+                  <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2">
+                    <p>Historial antiguo en modo lectura. Todas las encuestas y respuestas nuevas se guardan en la base nueva.</p>
+                    <p>Respuestas por origen: históricas {Object.values(storage.origins.responses).filter(o => o === 'histórica').length}, nuevas {Object.values(storage.origins.responses).filter(o => o === 'nueva').length}, coincidentes en ambas {Object.values(storage.origins.responses).filter(o => o === 'ambas').length}.</p>
+                    <button disabled={preparing || !storage.configured} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50" onClick={async () => {
+                      if (prepareInFlight.current) return;
+                      prepareInFlight.current = true; setPreparing(true); setPrepareMessage('');
+                      try { const count = await prepareHistoricalSurveys(); setPrepareMessage(`Se prepararon ${count} encuestas nuevas en la base nueva. No se copiaron respuestas ni se modificó el historial.`); await syncData(); }
+                      catch (error) { setPrepareMessage(error instanceof Error ? error.message : 'No se pudo preparar.'); }
+                      finally { prepareInFlight.current = false; setPreparing(false); }
+                    }}>{preparing ? 'Preparando…' : 'Habilitar nuevos envíos para encuestas históricas'}</button>
+                    {prepareMessage && <p role="status">{prepareMessage}</p>}
+                  </div>
                   {/* Sub Tab Navigation Selection */}
-                  <div className="no-print flex border-b border-slate-200">
+                  <div className="no-print flex flex-col sm:flex-row border-b border-slate-200">
                     <button
                       onClick={() => setAdminTab('create')}
                       className={`pb-3 text-sm font-semibold tracking-wide border-b-2 px-6 transition-all duration-150 flex items-center gap-2 cursor-pointer ${
@@ -346,6 +316,7 @@ export default function App() {
                   </div>
 
                   {/* Switch Rendered admin panel body */}
+                  <Suspense fallback={<p>Cargando panel…</p>}>
                   {adminTab === 'create' ? (
                     <AdminSurveyCreator 
                       onSurveyCreated={syncData} 
@@ -364,6 +335,7 @@ export default function App() {
                       }}
                     />
                   )}
+                  </Suspense>
                 </div>
               )
             )}

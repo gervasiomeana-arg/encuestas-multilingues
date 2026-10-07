@@ -126,7 +126,7 @@ export function normalizeSingleValue(
     }
 
     // 2c. Match against Global Fallback translations dictionary
-    if (GLOBAL_TRANSLATIONS_FALLBACK[lower]) {
+    if (typeof GLOBAL_TRANSLATIONS_FALLBACK[lower] === 'string') {
       const fallbackTarget = GLOBAL_TRANSLATIONS_FALLBACK[lower];
       // If the target is one of the question's options, return the canonical option
       const matchingOpt = question.options.find(
@@ -145,7 +145,7 @@ export function normalizeSingleValue(
   }
 
   // 3. Fallback dictionary check for general terms outside options
-  if (GLOBAL_TRANSLATIONS_FALLBACK[lower]) {
+  if (typeof GLOBAL_TRANSLATIONS_FALLBACK[lower] === 'string') {
     return GLOBAL_TRANSLATIONS_FALLBACK[lower];
   }
 
@@ -226,7 +226,7 @@ export function getSurveyLocalities(
   ];
 
   if (locationQuestion && locationQuestion.options) {
-    const countsMap: Record<string, number> = {};
+    const countsMap: Record<string, number> = Object.create(null);
     locationQuestion.options.forEach(opt => { countsMap[opt] = 0; });
 
     responses.forEach(res => {

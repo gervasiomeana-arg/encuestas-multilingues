@@ -1,7 +1,9 @@
 import { Survey, TranslationData } from '../types';
+import { adminAuthorizationHeaders } from '../authService';
 
 export interface ParseResult {
   success: boolean;
+  warnings?: string[];
   survey?: {
     title: string;
     description: string;
@@ -33,6 +35,7 @@ export async function uploadAndParseSurveyFile(file: File, useAI: boolean = true
   try {
     const response = await fetch(`/api/parse-survey?useAI=${useAI}`, {
       method: 'POST',
+      headers: await adminAuthorizationHeaders(),
       body: formData,
     });
 

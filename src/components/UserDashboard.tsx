@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Globe, 
   User, 
@@ -17,16 +17,16 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, COUNTRIES } from '../types';
-import { saveResponse, saveSurvey } from '../firebaseService';
+import { saveResponse } from '../firebaseService';
 import { translateSurveyWithAI } from '../utils/api';
+import { answerError, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
 
 interface UserDashboardProps {
   surveys: Survey[];
-  onSurveySubmitted: () => void;
   onActiveStateChange?: (isAnsweringAndAccepted: boolean) => void;
 }
 
-export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStateChange }: UserDashboardProps) {
+export default function UserDashboard({ surveys, onActiveStateChange }: UserDashboardProps) {
   // State for user tracking (Preset to anonymous / Mauritania per request)
   const [userName, setUserName] = useState<string>('Anónimo');
   const [userLang, setUserLang] = useState<string>('es'); // Default browser language code
@@ -37,10 +37,12 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   const [currentAnswers, setCurrentAnswers] = useState<Record<string, any>>({});
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submissionInFlight = useRef(false);
   
   // Translation on-the-fly state
   const [translatingId, setTranslatingId] = useState<string | null>(null);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  const [sessionSurveys, setSessionSurveys] = useState<Record<string, Survey>>({});
 
   // Form error notification
   const [formError, setFormError] = useState<string | null>(null);
@@ -135,7 +137,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
 
   const cleanQuestionText = (text: string): string => {
     if (!text) return '';
-    if (text.includes(':')) {
+    if (/^(BLOQUE|BLOC|القسم)\s*\d+/i.test(text) && text.includes(':')) {
       const parts = text.split(':');
       return parts.slice(1).join(':').trim();
     }
@@ -168,7 +170,8 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
     try {
       const response = await translateSurveyWithAI(survey, destLangCode, destLangName);
       if (response.success && response.translation) {
-        // Append the new translation mapping to the survey in memory and commit to Firestore
+        if (!translationCoverage(survey, response.translation).complete) throw new Error("La traducción está incompleta. No se modificó la encuesta; vuelve a intentar.");
+        // Append a translation only in this session, after checking complete coverage
         const updatedSurvey: Survey = {
           ...survey,
           translations: {
@@ -177,15 +180,13 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
           }
         };
 
-        await saveSurvey(updatedSurvey);
-        
-        // Update active selection to immediately show translation if user was viewing it
-        if (activeSurvey && activeSurvey.id === survey.id) {
-          setActiveSurvey(updatedSurvey);
-        }
-        
-        // Notify parent state of survey modifications
-        onSurveySubmitted();
+        setSessionSurveys(previous => ({ ...previous, [survey.id]: {
+          ...updatedSurvey,
+          translations: { ...survey.translations, ...previous[survey.id]?.translations, [destLangCode]: response.translation! }
+        }}));
+        setActiveSurvey(previous => previous?.id === survey.id ? {
+          ...previous, translations: { ...previous.translations, [destLangCode]: response.translation! }
+        } : previous);
       } else {
         setTranslateError(response.error || "La traducción automática no se pudo completar.");
       }
@@ -199,7 +200,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   // Switch Active survey to start answering
   const handleSelectSurvey = (survey: Survey) => {
     setFormError(null);
-    setActiveSurvey(survey);
+    setActiveSurvey(sessionSurveys[survey.id] || survey);
     setCurrentAnswers({});
     setSubmittedSuccess(false);
     setCurrentStep(0);
@@ -207,6 +208,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
 
   // Helper to extract localized text (falls back to original if selected language isn't available)
   const getLocalizedContent = (survey: Survey) => {
+    survey = sessionSurveys[survey.id] || survey;
     const hasTranslation = survey.translations && survey.translations[userLang];
     const data = hasTranslation ? survey.translations[userLang] : {
       title: survey.title,
@@ -217,7 +219,8 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
     return {
       title: data.title || survey.title,
       description: data.description || survey.description,
-      isTranslated: hasTranslation,
+      isTranslated: userLang === 'es' || translationCoverage(survey, hasTranslation).complete,
+      coverage: translationCoverage(survey, hasTranslation),
       getQuestionText: (qId: string, defaultText: string) => {
         if (hasTranslation && data.questions && data.questions[qId]) {
           return data.questions[qId].text || defaultText;
@@ -242,14 +245,12 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   };
 
   const handleMultipleChoiceToggle = (qId: string, option: string) => {
-    const current = (currentAnswers[qId] as string[]) || [];
-    let updated: string[];
-    if (current.includes(option)) {
-      updated = current.filter(o => o !== option);
-    } else {
-      updated = [...current, option];
-    }
-    handleSetAnswer(qId, updated);
+    const question = activeSurvey?.questions.find(q => q.id === qId);
+    if (!activeSurvey || !question) return;
+    try {
+      handleSetAnswer(qId, toggleChoices(activeSurvey, question, (currentAnswers[qId] as string[]) || [], option));
+      setFormError(null);
+    } catch (error) { setFormError((error as Error).message); }
   };
 
   // Multi-step validation for Survio format
@@ -258,12 +259,8 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
     const missing: string[] = [];
 
     stepQuestions.forEach(q => {
-      if (q.required) {
-        const val = currentAnswers[q.id];
-        if (val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0)) {
-          missing.push(cleanQuestionText(localized.getQuestionText(q.id, q.text)));
-        }
-      }
+      const error = answerError(survey, q, currentAnswers[q.id]);
+      if (error) missing.push(`${cleanQuestionText(localized.getQuestionText(q.id, q.text))}: ${error}`);
     });
 
     if (missing.length > 0) {
@@ -285,7 +282,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
   // Submit survey responses to Firestore
   const handleSubmitSurvey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeSurvey) return;
+    if (!activeSurvey || submissionInFlight.current || submittedSuccess) return;
 
     const localized = getLocalizedContent(activeSurvey);
 
@@ -301,12 +298,8 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
       // Standard full form validation for original format
       const missingFields: string[] = [];
       activeSurvey.questions.forEach(q => {
-        if (q.required) {
-          const val = currentAnswers[q.id];
-          if (val === undefined || val === null || val === "" || (Array.isArray(val) && val.length === 0)) {
-            missingFields.push(localized.getQuestionText(q.id, q.text));
-          }
-        }
+        const error = answerError(activeSurvey, q, currentAnswers[q.id]);
+        if (error) missingFields.push(`${localized.getQuestionText(q.id, q.text)}: ${error}`);
       });
 
       if (missingFields.length > 0) {
@@ -317,25 +310,26 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
     }
 
     setFormError(null);
+    submissionInFlight.current = true;
     setSubmitting(true);
 
     try {
       const newResponse: SurveyResponse = {
-        id: `resp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        id: `resp_${crypto.randomUUID()}`,
         surveyId: activeSurvey.id,
         userName: userName.trim(),
         userLanguage: userLang,
-        userCountry: userCountry,
+        ...(activeSurvey.targetCountry ? { userCountry: activeSurvey.targetCountry } : {}),
         answers: currentAnswers,
         submittedAt: new Date().toISOString()
       };
 
       await saveResponse(newResponse);
       setSubmittedSuccess(true);
-      onSurveySubmitted(); // Refresh active dashboard counter
     } catch (err: any) {
       setFormError("Ocurrió un error al intentar enviar tu encuesta a la base de datos.");
     } finally {
+      submissionInFlight.current = false;
       setSubmitting(false);
     }
   };
@@ -344,7 +338,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
     <div className="space-y-8" id="user-dashboard-wrapper">
       
       {/* SECTION 1: SYSTEM LANGUAGE */}
-      {!activeSurvey && (
+      {!submittedSuccess && (
         <section className="bg-white p-6 rounded-2xl border border-slate-205 shadow-xs max-w-xl mx-auto" id="user-profile-card">
           <h2 className="text-base font-bold font-display text-slate-800 mb-2 flex items-center justify-center gap-2">
             <Globe className="w-5 h-5 text-indigo-600 animate-pulse" />
@@ -355,6 +349,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
           </p>
           <div className="relative max-w-xs mx-auto">
             <select
+              disabled={submitting}
               value={userLang}
               onChange={(e) => {
                 setUserLang(e.target.value);
@@ -373,6 +368,17 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
         </section>
       )}
 
+      {activeSurvey && (() => {
+        const content = getLocalizedContent(activeSurvey);
+        return !content.isTranslated && <div role="status" className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">
+          Traducción disponible: {content.coverage.translated} de {content.coverage.total} preguntas. Las restantes aparecen en el idioma original.
+          <button type="button" onClick={() => handleDynamicTranslation(activeSurvey, userLang)} disabled={translatingId === activeSurvey.id} className="ml-2 underline font-semibold">
+            {translatingId === activeSurvey.id ? 'Traduciendo…' : 'Completar traducción de esta sesión'}
+          </button>
+        </div>;
+      })()}
+      {translateError && <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{translateError}</div>}
+
       {/* Global general error banner */}
       {formError && (
         <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl flex items-start gap-3 shadow-xs animate-shake">
@@ -383,7 +389,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
 
       {/* SECTION 2: VIEW OR FILL ACTIVE SURVEY */}
       {activeSurvey ? (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden card-transition" id="answering-survey-canvas">
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden card-transition" id="answering-survey-canvas" dir={userLang === 'haa' ? 'rtl' : 'ltr'}>
           
           {/* Active Survey Header */}
           {(() => {
@@ -434,32 +440,18 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                         ) : (
                           <span className="bg-emerald-500/25 text-emerald-300 border border-emerald-400/20 font-mono text-[9px] md:text-[10px] uppercase font-bold tracking-widest px-2.5 py-1.5 rounded-xl flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5" />
-                            Traducción IA Activa
+                            Idioma disponible
                           </span>
                         )}
                       </div>
                     </div>
 
-                    {!tempLang.isTranslated && (
-                      <div className="mt-4 bg-orange-500/15 border border-orange-500/25 text-orange-200 rounded-xl p-3 text-[11px] md:text-xs flex items-center gap-2 max-w-2xl leading-relaxed font-sans">
-                        <Info className="w-4 h-4 text-orange-400 shrink-0" />
-                        <span>
-                          Nota: Esta encuesta está en su formato original. Toca <b>Traducir</b> arriba para responder en {userLangName} usando Gemini.
-                        </span>
-                      </div>
-                    )}
-
-                    {translateError && (
-                      <div className="mt-3 bg-red-500/20 border border-red-500/30 text-red-200 rounded-xl p-2.5 text-[11px] md:text-xs flex items-center gap-2">
-                        <AlertCircle className="w-4 h-4 text-red-400" />
-                        <span>{translateError}</span>
-                      </div>
-                    )}
                   </div>
                 )}
 
                 {/* Question Canvas Form */}
                 <form onSubmit={handleSubmitSurvey} className="p-6 md:p-8 space-y-8">
+                  <fieldset disabled={submitting} className="min-w-0">
                   {submittedSuccess ? (
                     <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 animate-fadeIn">
                       <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center border border-emerald-200 shadow-xs">
@@ -654,10 +646,11 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                                       {q.type === 'single_choice' && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
                                           {localizedOptions?.map((opt) => {
-                                            const isSelected = currentVal === opt;
+                                            const isSelected = optionMatches(activeSurvey, q, currentVal, opt);
                                             return (
                                               <button
                                                 key={opt}
+                                                aria-pressed={Array.isArray(currentVal) ? currentVal.some(value => optionMatches(activeSurvey, q, value, opt)) : optionMatches(activeSurvey, q, currentVal, opt)}
                                                 type="button"
                                                 onClick={() => handleSetAnswer(q.id, opt)}
                                                 className={`py-3.5 px-5 rounded-2xl border text-left text-xs font-semibold tracking-wide transition-all cursor-pointer flex items-center justify-between group ${
@@ -686,10 +679,11 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                                       {q.type === 'multiple_choice' && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
                                           {localizedOptions?.map((opt) => {
-                                            const isSelected = Array.isArray(currentVal) && currentVal.includes(opt);
+                                            const isSelected = Array.isArray(currentVal) && currentVal.some(value => optionMatches(activeSurvey, q, value, opt));
                                             return (
                                               <button
                                                 key={opt}
+                                                aria-pressed={Array.isArray(currentVal) ? currentVal.some(value => optionMatches(activeSurvey, q, value, opt)) : optionMatches(activeSurvey, q, currentVal, opt)}
                                                 type="button"
                                                 onClick={() => handleMultipleChoiceToggle(q.id, opt)}
                                                 className={`py-3.5 px-5 rounded-2xl border text-left text-xs font-semibold tracking-wide transition-all cursor-pointer flex items-center justify-between group ${
@@ -873,16 +867,17 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                                   {localizedOptions?.map((opt) => (
                                     <button
                                       key={opt}
+                                                aria-pressed={Array.isArray(currentVal) ? currentVal.some(value => optionMatches(activeSurvey, q, value, opt)) : optionMatches(activeSurvey, q, currentVal, opt)}
                                       type="button"
                                       onClick={() => handleSetAnswer(q.id, opt)}
                                       className={`py-2.5 px-4 rounded-xl border text-left text-xs font-medium transition-all cursor-pointer flex items-center gap-3 ${
-                                        currentVal === opt
+                                        optionMatches(activeSurvey, q, currentVal, opt)
                                           ? 'bg-indigo-50 border-indigo-300 text-indigo-800 shadow-xs'
                                           : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                                       }`}
                                     >
-                                      <span className={`w-4 h-4 rounded-full border shrink-0 flex items-center justify-center ${currentVal === opt ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300 bg-white'}`}>
-                                        {currentVal === opt && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                                      <span className={`w-4 h-4 rounded-full border shrink-0 flex items-center justify-center ${optionMatches(activeSurvey, q, currentVal, opt) ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300 bg-white'}`}>
+                                        {optionMatches(activeSurvey, q, currentVal, opt) && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
                                       </span>
                                       <span>{opt}</span>
                                     </button>
@@ -894,10 +889,11 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                               {q.type === 'multiple_choice' && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                                   {localizedOptions?.map((opt) => {
-                                    const isSelected = Array.isArray(currentVal) && currentVal.includes(opt);
+                                    const isSelected = Array.isArray(currentVal) && currentVal.some(value => optionMatches(activeSurvey, q, value, opt));
                                     return (
                                       <button
                                         key={opt}
+                                                aria-pressed={Array.isArray(currentVal) ? currentVal.some(value => optionMatches(activeSurvey, q, value, opt)) : optionMatches(activeSurvey, q, currentVal, opt)}
                                         type="button"
                                         onClick={() => handleMultipleChoiceToggle(q.id, opt)}
                                         className={`py-2.5 px-4 rounded-xl border text-left text-xs font-medium transition-all cursor-pointer flex items-center gap-3 ${
@@ -953,6 +949,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                       </div>
                     </>
                   )}
+                  </fieldset>
                 </form>
               </>
             );
@@ -980,7 +977,7 @@ export default function UserDashboard({ surveys, onSurveySubmitted, onActiveStat
                 const localized = getLocalizedContent(survey);
                 const hasAnswers = survey.questions && survey.questions.length > 0;
                 const countryDef = COUNTRIES.find(c => c.name === survey.targetCountry);
-                const isSelectedLangAvail = survey.translations && survey.translations[userLang];
+                const isSelectedLangAvail = localized.isTranslated;
 
                 return (
                   <div 

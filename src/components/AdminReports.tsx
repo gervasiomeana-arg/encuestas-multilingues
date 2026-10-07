@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from 'react';
+import { databaseStatus, assertCompleteBackup } from '../firebaseService';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -36,8 +37,9 @@ import {
   CheckCircle
 } from 'lucide-react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, SurveyQuestion } from '../types';
-import { deleteSurvey, saveMultipleResponses } from '../firebaseService';
-import { INITIAL_MAURITANIA_RESPONSES } from '../utils/mauritaniaResponsesData';
+import { saveMultipleResponses } from '../firebaseService';
+import { ratingAverage, ratingScore, prepareResponseImport } from '../utils/dataProtection';
+import { ratingDistribution, surveyReportCSV, resolveResponseSurvey } from '../utils/reportData';
 import { 
   normalizeAnswerToSpanish, 
   getQuestionTypeLabelES,
@@ -92,6 +94,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [importJsonText, setImportJsonText] = useState<string>('');
   const [importLoading, setImportLoading] = useState<boolean>(false);
+  const importInFlight = useRef(false);
   const [importSuccessAlert, setImportSuccessAlert] = useState<string>('');
   const [importErrorAlert, setImportErrorAlert] = useState<string>('');
 
@@ -127,34 +130,14 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     });
   }, [allSurveyResponses, selectedLocality, locationQuestion, currentSurvey]);
 
-  // Handle deletions of surveys
-  const handleDeleteSurvey = async (id: string) => {
-    if (confirm("¿Estás seguro de que deseas eliminar esta encuesta y todo su historial de respuestas? Esta acción es irreversible.")) {
-      try {
-        await deleteSurvey(id);
-        onSurveyDeleted();
-        
-        // Select next available survey
-        const remaining = surveys.filter(s => s.id !== id);
-        if (remaining.length > 0) {
-          setSelectedSurveyId(remaining[0].id);
-        } else {
-          setSelectedSurveyId('');
-        }
-        setSelectedLocality('ALL');
-      } catch (err) {
-        console.error("Error al eliminar la encuesta:", err);
-      }
-    }
-  };
-
   // ---------------------------------------------------------------------------------
   // NORMALIZED CHART MATHEMATICAL PREPARATIONS (ALL ANSWERS CONSOLIDATED IN SPANISH)
   // ---------------------------------------------------------------------------------
 
   const computeChartData = (question: SurveyQuestion) => {
-    const counts: Record<string, number> = {};
+    const counts: Record<string, number> = Object.create(null);
     const questionType = question.type;
+    if (questionType === 'rating') return ratingDistribution(filteredResponses.map(response => response.answers[question.id]));
     const options = question.options || [];
 
     // Initialize canonical Spanish options
@@ -165,10 +148,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
       options.forEach(opt => {
         counts[opt] = 0;
       });
-    } else if (questionType === 'rating') {
-      for (let i = 1; i <= 10; i++) {
-        counts[i.toString()] = 0;
-      }
     }
 
     let totalAnswersCount = 0;
@@ -210,16 +189,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
           porcentaje: totalBool > 0 ? ((noVotes / totalBool) * 100).toFixed(1) : '0.0' 
         }
       ];
-    } else if (questionType === 'rating') {
-      return Object.keys(counts).map(num => {
-        const votes = counts[num] || 0;
-        return {
-          name: `Puntaje ${num}`,
-          score: num,
-          Votos: votes,
-          porcentaje: totalAnswersCount > 0 ? ((votes / totalAnswersCount) * 100).toFixed(1) : '0.0'
-        };
-      });
     } else {
       // General choice options (single_choice, multiple_choice)
       const orderedKeys = options.length > 0 ? options : Object.keys(counts);
@@ -238,21 +207,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
 
   // Calculate Average score specifically for Rating questions
   const calculateRatingAverage = (questionId: string) => {
-    let sum = 0;
-    let count = 0;
-
-    filteredResponses.forEach(res => {
-      const val = res.answers[questionId];
-      if (typeof val === 'number') {
-        sum += val;
-        count++;
-      } else if (typeof val === 'string' && !isNaN(Number(val))) {
-        sum += Number(val);
-        count++;
-      }
-    });
-
-    return count > 0 ? (sum / count).toFixed(1) : 'N/A';
+    return ratingAverage(filteredResponses.map(res => res.answers[questionId]));
   };
 
   // ---------------------------------------------------------------------------------
@@ -303,39 +258,15 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     }
   };
 
-  // Export current survey responses to CSV (100% Spanish translated)
+  // Export original values alongside the existing normalization, without writes.
   const handleExportCSV = () => {
     if (!currentSurvey || filteredResponses.length === 0) {
       alert("No hay respuestas registradas para exportar en esta selección.");
       return;
     }
 
-    const headers = ['ID Respuesta', 'Fecha', 'Participante', 'Idioma Original', 'País'];
-    currentSurvey.questions.forEach((q, i) => {
-      headers.push(`P${i + 1}: ${q.text.replace(/[\r\n",]/g, ' ')}`);
-    });
-
-    const rows = filteredResponses.map(res => {
-      const row = [
-        res.id,
-        new Date(res.submittedAt).toLocaleString('es-ES'),
-        `"${(res.userName || 'Anónimo').replace(/"/g, '""')}"`,
-        res.userLanguage || 'es',
-        res.userCountry || currentSurvey.targetCountry || 'N/A'
-      ];
-
-      currentSurvey.questions.forEach(q => {
-        const raw = res.answers[q.id];
-        const norm = normalizeAnswerToSpanish(raw, q, currentSurvey);
-        const strVal = Array.isArray(norm) ? norm.join('; ') : String(norm ?? '');
-        row.push(`"${strVal.replace(/"/g, '""')}"`);
-      });
-
-      return row.join(',');
-    });
-
     const localitySuffix = selectedLocality === 'ALL' ? 'todas' : selectedLocality.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\n');
+    const csvContent = surveyReportCSV(currentSurvey, filteredResponses);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -344,22 +275,30 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
   const handleExportBackupJSON = () => {
-    if (allSurveyResponses.length === 0) {
-      alert("Aún no hay respuestas registradas para respaldar.");
+    try { assertCompleteBackup(); } catch (error) { alert((error as Error).message); return; }
+    if (surveys.length === 0 && responses.length === 0) {
+      alert("Aún no hay información registrada para respaldar.");
       return;
     }
-    const jsonStr = JSON.stringify(allSurveyResponses, null, 2);
+    const jsonStr = JSON.stringify({
+      format: 'survey-backup', version: 1, exportedAt: new Date().toISOString(),
+      counts: { surveys: surveys.length, responses: responses.length },
+      surveys, responses,
+      sources: databaseStatus().origins
+    }, null, 2);
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `respaldo_completo_${currentSurvey?.id || 'encuesta'}_${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `respaldo_encuestas_y_respuestas_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDownloadSuccessToast('¡Copia de seguridad descargada con éxito!');
     setTimeout(() => setDownloadSuccessToast(''), 4000);
   };
@@ -368,49 +307,18 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
   // IMPORT & INCORPORATE RESPONSES HANDLERS
   // ---------------------------------------------------------------------------------
 
-  const handleRestoreMauritaniaResponses = async () => {
-    setImportLoading(true);
-    setImportErrorAlert('');
-    setImportSuccessAlert('');
-    try {
-      const count = await saveMultipleResponses(INITIAL_MAURITANIA_RESPONSES);
-      setImportSuccessAlert(`¡Se incorporaron exitosamente ${count} respuestas a la base de datos!`);
-      if (onResponsesUpdated) {
-        onResponsesUpdated();
-      }
-      setTimeout(() => {
-        setIsImportModalOpen(false);
-        setImportSuccessAlert('');
-      }, 1500);
-    } catch (err: any) {
-      setImportErrorAlert('Error al guardar en la base de datos: ' + (err.message || String(err)));
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
   const handleImportJson = async () => {
+    if (importInFlight.current) return;
     if (!importJsonText.trim()) {
       setImportErrorAlert('Por favor pega el JSON o texto con las respuestas.');
       return;
     }
+    importInFlight.current = true;
     setImportLoading(true);
     setImportErrorAlert('');
     setImportSuccessAlert('');
     try {
-      let parsed = JSON.parse(importJsonText.trim());
-      if (!Array.isArray(parsed)) {
-        parsed = [parsed];
-      }
-      const formatted: SurveyResponse[] = parsed.map((item: any, idx: number) => ({
-        id: item.id || `resp_import_${Date.now()}_${idx}`,
-        surveyId: item.surveyId || currentSurvey?.id || 'survey_mauritania_dos',
-        userName: item.userName || item.nombre || `Participante ${idx + 1}`,
-        userLanguage: item.userLanguage || item.idioma || 'es',
-        userCountry: item.userCountry || currentSurvey?.targetCountry || 'Mauritania',
-        answers: item.answers || item.respuestas || item,
-        submittedAt: item.submittedAt || item.fecha || new Date().toISOString()
-      }));
+      const formatted = prepareResponseImport(JSON.parse(importJsonText.trim()));
 
       const count = await saveMultipleResponses(formatted);
       setImportSuccessAlert(`¡Se han importado exitosamente ${count} respuestas!`);
@@ -423,8 +331,9 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
         setImportSuccessAlert('');
       }, 1500);
     } catch (err: any) {
-      setImportErrorAlert('El formato JSON ingresado no es válido: ' + (err.message || String(err)));
+      setImportErrorAlert('No se pudo importar. Los registros existentes se conservaron: ' + (err.message || String(err)));
     } finally {
+      importInFlight.current = false;
       setImportLoading(false);
     }
   };
@@ -447,6 +356,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
     
     const answeredCount = filteredResponses.filter(r => {
       const a = r.answers[q.id];
+      if (q.type === 'rating') return ratingScore(a) !== null;
       return a !== undefined && a !== null && a !== '' && (!Array.isArray(a) || a.length > 0);
     }).length;
 
@@ -468,14 +378,14 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
             <span className="leading-snug">{q.text}</span>
           </h5>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0 max-w-full">
             <span className="text-[10px] bg-slate-100 text-slate-600 font-bold uppercase tracking-wider font-mono px-2.5 py-1 rounded-md border border-slate-200">
               {getQuestionTypeLabelES(q.type)}
             </span>
             <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold font-mono px-2.5 py-1 rounded-md border border-indigo-200">
-              {answeredCount} VOTOS
+              {answeredCount} RESPUESTAS
             </span>
-            {averageRating && (
+            {averageRating && averageRating !== 'N/A' && (
               <span className="text-[10px] bg-amber-50 border border-amber-200 text-amber-800 font-bold uppercase tracking-wider px-2.5 py-1 rounded-md flex items-center gap-1 font-mono">
                 <Award className="w-3 h-3 text-amber-600" />
                 Promedio: {averageRating}/10
@@ -484,9 +394,16 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
           </div>
         </div>
 
+        {q.type === 'multiple_choice' && (
+          <p className="text-xs text-slate-500">Porcentajes sobre el total de selecciones, no sobre participantes. Una respuesta puede incluir varias opciones.</p>
+        )}
+        {q.type === 'rating' && (
+          <p className="text-xs text-slate-500">Gráfico y promedio: puntajes enteros entre 1 y 10. Los valores fuera de escala o inválidos se conservan en el registro y el CSV original.</p>
+        )}
+
         {/* SUBTITLE: GRÁFICO DE BARRAS */}
         {q.type !== 'text' && (
-          <div className="flex items-center justify-between text-[11px] font-mono font-bold text-slate-400">
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between text-[11px] font-mono font-bold text-slate-400">
             <span>GRÁFICO DE BARRAS • DISTRIBUCIÓN EN ESPAÑOL</span>
             <span>{answeredCount} de {filteredResponses.length} respuestas</span>
           </div>
@@ -1057,10 +974,10 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
       {/* ========================================================================= */}
       {/* TAB MENU HEADER SELECTOR (SCREEN ONLY) */}
       {/* ========================================================================= */}
-      <div className="no-print flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex-col sm:flex-row gap-4">
+      <div className="no-print flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex-col xl:flex-row gap-4">
         
         {/* Left Toggles */}
-        <div className="flex bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+        <div className="flex flex-col lg:flex-row bg-slate-100 p-1 rounded-xl w-full lg:w-auto min-w-0">
           <button
             onClick={() => setActiveTab('analytics')}
             className={`flex-1 sm:flex-none flex items-center justify-center space-x-2 px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all duration-150 cursor-pointer ${
@@ -1086,14 +1003,14 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
         </div>
 
         {/* Right Actions: Survey Switcher + View Report on Screen + PDF Generator Button + CSV */}
-        <div className="flex items-center flex-wrap gap-2 w-full sm:w-auto">
+        <div className="flex items-center flex-wrap gap-2 w-full xl:w-auto min-w-0">
           <select
             value={selectedSurveyId}
             onChange={(e) => {
               setSelectedSurveyId(e.target.value);
               setSelectedLocality('ALL');
             }}
-            className="flex-1 sm:w-56 bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-3 py-2.5 outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+            className="w-full sm:w-56 min-w-0 max-w-full bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl px-3 py-2.5 outline-hidden focus:ring-2 focus:ring-indigo-500 cursor-pointer"
           >
             {surveys.map(s => (
               <option key={s.id} value={s.id}>
@@ -1140,7 +1057,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
           {/* BUTTON 4: CSV */}
           <button
             onClick={handleExportCSV}
-            title="Descargar respuestas en archivo CSV (100% traducido al español)"
+            title="Descargar respuestas originales y normalizadas en CSV"
             className="px-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer shadow-2xs"
           >
             <Download className="w-3.5 h-3.5" />
@@ -1338,7 +1255,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                       type="text" 
                       readOnly 
                       value={`${window.location.origin}${window.location.pathname}?surveyId=${currentSurvey.id}`}
-                      className="bg-white border border-slate-200 text-[11px] font-mono p-2.5 rounded-xl text-slate-600 flex-1 md:w-80 outline-hidden select-all"
+                      className="bg-white border border-slate-200 text-[11px] font-mono p-2.5 rounded-xl text-slate-600 flex-1 min-w-0 w-full md:w-80 outline-hidden select-all"
                     />
                     <button
                       type="button"
@@ -1484,8 +1401,8 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                   {filteredResponses.map((res) => {
-                    const relatedSurvey = surveys.find(s => s.id === res.surveyId);
-                    const relatedSurveyTitle = relatedSurvey?.title || "Encuesta Eliminada";
+                    const relatedSurvey = resolveResponseSurvey(surveys, res.surveyId);
+                    const relatedSurveyTitle = relatedSurvey?.title || "Encuesta no disponible";
                     const activeLangName = AVAILABLE_LANGUAGES.find(l => l.code === res.userLanguage)?.name || res.userLanguage;
 
                     return (
@@ -1493,7 +1410,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                         <td className="p-3 max-w-xs truncate font-semibold text-slate-800" title={relatedSurveyTitle}>
                           {relatedSurveyTitle}
                         </td>
-                        <td className="p-3 text-slate-600 font-semibold">{res.userName || 'Anónimo'}</td>
+                        <td className="p-3 text-slate-600 font-semibold">{res.userName || 'Anónimo'} <span className="block text-xs text-slate-400">Origen: {databaseStatus().origins.responses[res.id] || 'sin confirmar'}</span></td>
                         <td className="p-3">
                           <span className="bg-slate-100 border border-slate-200 text-slate-700 px-2.5 py-0.5 rounded-full font-bold uppercase text-[9px] font-mono">
                             {activeLangName}
@@ -1706,7 +1623,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
               {(() => {
-                const targetSurvey = surveys.find(s => s.id === viewingResponse.surveyId);
+                const targetSurvey = resolveResponseSurvey(surveys, viewingResponse.surveyId);
                 if (!targetSurvey) {
                   return (
                     <div className="text-center text-slate-400 py-8 text-xs">
@@ -1730,7 +1647,12 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                         </span>
                       </div>
                       
+                      <div className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200/60">
+                        <p className="font-bold mb-1">Respuesta original guardada</p>
+                        <p className="whitespace-pre-wrap break-words">{Array.isArray(rawAns) ? JSON.stringify(rawAns) : String(rawAns ?? '') || 'Sin respuesta'}</p>
+                      </div>
                       <div className="text-xs font-semibold text-indigo-900 bg-white p-2.5 rounded-lg border border-slate-200/60">
+                        <p className="text-slate-500 font-normal mb-1">Interpretación normalizada para informes</p>
                         {rawAns === undefined || rawAns === null || rawAns === '' ? (
                           <span className="text-slate-400 italic font-normal">Sin respuesta</span>
                         ) : Array.isArray(normalizedAns) ? (
@@ -1813,49 +1735,6 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                 </div>
               )}
 
-              {/* OPTION 1: 1-CLICK RESTORE/INCORPORATE MAURITANIA RESPONSES */}
-              <div className="p-5 bg-gradient-to-br from-indigo-50/80 to-purple-50/50 rounded-2xl border border-indigo-100 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
-                      <Sparkles className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h5 className="text-xs font-bold text-indigo-950 uppercase tracking-wider font-mono">
-                        Opción Rápida: Incorporar Respuestas de Campo de Mauritania
-                      </h5>
-                      <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
-                        Carga el conjunto completo de encuestas recopiladas en Mauritania (Nuadibú y Nuakchot) con las 42 preguntas respondidas, perfiles, salud, tránsito y derechos.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-between gap-3 flex-wrap border-t border-indigo-100/70">
-                  <span className="text-[11px] text-indigo-700 font-semibold font-mono">
-                    • 8 encuestas completas de terreno listas para guardar
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleRestoreMauritaniaResponses}
-                    disabled={importLoading}
-                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-200 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {importLoading ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Guardando en Base de Datos...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Database className="w-3.5 h-3.5" />
-                        <span>Incorporar Respuestas a Firestore</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-
               {/* OPTION 2: PASTE JSON OR TEXT */}
               <div className="space-y-3 border-t border-slate-100 pt-5">
                 <div className="flex items-center justify-between">
@@ -1877,7 +1756,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
                 <textarea
                   value={importJsonText}
                   onChange={(e) => setImportJsonText(e.target.value)}
-                  placeholder={`Pega aquí el JSON de respuestas (ejemplo: [{"surveyId": "survey_mauritania_dos", "answers": {...}}])`}
+                  placeholder={`Pega un respaldo o registros con id, surveyId, userName, userLanguage, answers y submittedAt. No se completan campos faltantes automáticamente.`}
                   rows={4}
                   className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
                 />
