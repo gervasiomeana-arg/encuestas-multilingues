@@ -77,10 +77,8 @@ export default function App() {
     let unmounted = false;
     const unsubscribe = watchAdminSession(admin => {
       if (unmounted) return;
-      setIsAdminAuthenticated(prev => {
-        if (!admin) setResponses([]);
-        return admin;
-      });
+      if (!admin) setResponses([]);
+      setIsAdminAuthenticated(admin);
     });
     return () => {
       unmounted = true;
