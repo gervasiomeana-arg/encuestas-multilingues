@@ -7,8 +7,18 @@ import { Survey, SurveyResponse } from './types';
 import { DualRepository, canonical, CollectionName, StoredRecord, WriteStore } from './utils/dualDatabase';
 
 async function list(database: Firestore, name: CollectionName): Promise<StoredRecord[]> {
-  const snapshot = await getDocs(collection(database, name));
-  return snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+  const readPromise = getDocs(collection(database, name)).then(snapshot =>
+    snapshot.docs.map(d => ({ ...d.data(), id: d.id }))
+  );
+  let timer: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Tiempo de espera agotado al consultar ${name} en Firebase Cloud.`)), 15000);
+  });
+  try {
+    return await Promise.race([readPromise, timeoutPromise]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 function writer(database: Firestore): WriteStore {
   return {

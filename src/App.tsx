@@ -48,9 +48,9 @@ export default function App() {
   const prepareInFlight = useRef(false);
   const [prepareMessage, setPrepareMessage] = useState('');
   const storage = databaseStatus();
-  const syncGeneration = useRef(0);
+  const latestSyncId = useRef(0);
   const syncData = useCallback(async () => {
-    const generation = ++syncGeneration.current;
+    const syncId = ++latestSyncId.current;
     setLoading(true);
     setLoadError('');
     try {
@@ -59,28 +59,37 @@ export default function App() {
         getAllSurveys(),
         isAdminAuthenticated ? getAllResponses() : Promise.resolve([])
       ]);
-      if (generation !== syncGeneration.current) return;
+      if (syncId !== latestSyncId.current) return;
       setSurveys(allSurveys);
       setResponses(allResponses);
     } catch (error) {
-      if (generation === syncGeneration.current) {
+      if (syncId === latestSyncId.current) {
         setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la información.');
       }
     } finally {
-      if (generation === syncGeneration.current) setLoading(false);
+      if (syncId === latestSyncId.current) {
+        setLoading(false);
+      }
     }
   }, [isAdminAuthenticated]);
 
-  useEffect(() => watchAdminSession(admin => {
-    // Initial signed-out notification must not invalidate the public load.
-    // Actual auth changes trigger syncData and its effect cleanup below.
-    if (!admin) setResponses([]);
-    setIsAdminAuthenticated(admin);
-  }), []);
+  useEffect(() => {
+    let unmounted = false;
+    const unsubscribe = watchAdminSession(admin => {
+      if (unmounted) return;
+      setIsAdminAuthenticated(prev => {
+        if (!admin) setResponses([]);
+        return admin;
+      });
+    });
+    return () => {
+      unmounted = true;
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     syncData();
-    return () => { ++syncGeneration.current; };
   }, [syncData]);
 
   return (
@@ -262,7 +271,7 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row gap-2 shrink-0">
                       <button
                         onClick={async () => {
-                          ++syncGeneration.current;
+                          ++latestSyncId.current;
                           setResponses([]);
                           setIsAdminAuthenticated(false);
                           setEditingSurvey(null);
