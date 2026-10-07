@@ -12,6 +12,7 @@ import { requireAdministrator, createApiLimiter, apiErrorHandler } from './serve
 import { parseRawTextToSurveyVerbatim } from './src/utils/surveyParser';
 import { validSurveyDraft, validTranslationRequest } from './src/utils/apiValidation';
 import { translationCoverage } from './src/utils/surveyValidation';
+import { NEW_FIREBASE_ENV } from './src/newFirebaseConfig';
 
 // Ensure environment variables are loaded in local developer environment
 dotenv.config();
@@ -19,7 +20,7 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 // Authentication belongs exclusively to the new project; no fallback to historical credentials.
-const projectId = process.env.FIREBASE_PROJECT_ID;
+const projectId = process.env.FIREBASE_PROJECT_ID ?? NEW_FIREBASE_ENV.VITE_NEW_FIREBASE_PROJECT_ID;
 const adminApp = projectId && projectId !== 'chromatic-pride-0ttsj'
   ? getApps().find(app => app.name === 'survey-auth') || initializeApp({ projectId }, 'survey-auth') : null;
 const adminOnly = requireAdministrator(async token => {

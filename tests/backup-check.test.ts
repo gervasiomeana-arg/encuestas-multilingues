@@ -59,9 +59,10 @@ test('backup CLI only reads files and prints counts and hashes without private c
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('production template cannot target the historical database before new configuration', () => {
+test('production rules configuration targets only the confirmed new database', () => {
   const configuration = JSON.parse(readFileSync('firebase.production.json', 'utf8'));
-  assert.equal(configuration.firestore[0].database, 'REPLACE_WITH_NEW_DATABASE_ID');
+  assert.equal(configuration.firestore.length, 1);
+  assert.equal(configuration.firestore[0].database, 'encuestas-nuevas');
   assert.equal(configuration.firestore[0].rules, 'firestore.rules');
   assert.doesNotMatch(JSON.stringify(configuration), /ai-studio-f947253c|chromatic-pride/);
 });

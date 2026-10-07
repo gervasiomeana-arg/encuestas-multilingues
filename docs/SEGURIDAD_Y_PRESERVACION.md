@@ -9,8 +9,11 @@ nuevas se guardan exclusivamente en `newDb`, en OTRO proyecto bajo control del u
 La configuración ausente o incompleta bloquea escrituras; nunca vuelve al destino antiguo.
 `firebase-applet-config.json` sigue intacto y no determina el destino nuevo.
 
-No se ejecutaron lecturas o escrituras reales, cambios de usuarios, reglas,
-migraciones, publicaciones ni restauraciones desde esta revisión.
+La revisión del código no ejecuta operaciones contra Firebase. El usuario creó
+la base `encuestas-nuevas` en `gen-lang-client-0958943545`, confirmó la publicación
+de las reglas y habilitó su cuenta administradora. La captura del comando confirma
+la reclamación `admin: true`; las reglas y el acceso de la app aún requieren
+verificación en producción. No se migraron respuestas ni se modificó el historial.
 
 ## Lecturas, origen y conflictos
 
@@ -80,21 +83,22 @@ deduplicación entre sesiones, dispositivos o envíos con resultado incierto.
 
 ## Configuración y activación pendiente
 
-1. Crear o elegir un proyecto nuevo accesible. No se da por autorizado usar el
-   proyecto del remix sin confirmar sus permisos y la base de destino.
-2. Configurar los cinco `VITE_NEW_FIREBASE_*` de `.env.example` con parámetros
-   públicos de su app web y el ID de la base existente. No usar el proyecto antiguo.
-   Las variables VITE se incorporan al compilar: recompilar tras configurarlas.
+1. Destino confirmado: proyecto `gen-lang-client-0958943545`, base Standard
+   `encuestas-nuevas`. Las dos bases Enterprise del remix quedan intactas.
+2. `src/newFirebaseConfig.ts` contiene los parámetros públicos confirmados de la
+   app web y ese destino. Funciona sin configurar variables VITE adicionales.
+   Para cambiarlo, definir los cinco `VITE_NEW_FIREBASE_*` juntos; un conjunto
+   parcial bloquea la conexión. Recompilar tras modificar configuración.
 3. Habilitar Email/Password, crear/seleccionar la cuenta administradora, conservar
    contraseñas en canales privados, asignar `admin: true` con Admin SDK conservando
    otras reclamaciones y comprobar dominios autorizados. Renovar token/iniciar sesión.
-4. Configurar `FIREBASE_PROJECT_ID` del servidor igual a
-   `VITE_NEW_FIREBASE_PROJECT_ID` y credenciales de verificación. Nunca subir claves
-   de servicio al repositorio. Comprobar el login y la API con la cuenta final.
-5. Sustituir `REPLACE_WITH_NEW_DATABASE_ID` en `firebase.production.json` por el
-   destino nuevo confirmado y usar explícitamente el proyecto NUEVO en la CLI.
-   El archivo es una plantilla, NO una configuración lista para publicar.
-   Comprobar antes que la base existe; la CLI podría crearla si no existe.
+4. El servidor usa por defecto el mismo proyecto confirmado. Si se configura
+   `FIREBASE_PROJECT_ID`, debe coincidir con el cliente. Mantener credenciales de
+   verificación válidas; nunca subir claves de servicio al repositorio.
+   Comprobar el login y la API con la cuenta final.
+5. `firebase.production.json` apunta exclusivamente a `encuestas-nuevas`.
+   Si se publica con CLI, indicar explícitamente el proyecto:
+   `firebase deploy --only firestore:rules --config firebase.production.json --project gen-lang-client-0958943545`.
    No ejecutar este despliegue en chromatic-pride-0ttsj. No cambiar sus reglas.
 6. Coordinar publicación de reglas nuevas y app. Confirmar lectura histórica y
    conteos actuales; preparar definiciones con el botón de administración.

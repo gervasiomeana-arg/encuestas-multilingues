@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DualRepository, StoredRecord, CollectionName, canonical, newDatabaseConfig } from '../src/utils/dualDatabase';
+import { NEW_FIREBASE_ENV, selectNewFirebaseEnv } from '../src/newFirebaseConfig';
 function store(initial: {surveys?: StoredRecord[]; responses?: StoredRecord[]}, fail = false) {
   const data = {surveys: structuredClone(initial.surveys || []), responses: structuredClone(initial.responses || [])};
   let writes = 0;
@@ -45,6 +46,14 @@ test('new configuration requires all fields and a separate project', () => {
   assert.equal(newDatabaseConfig({}),null); assert.throws(()=>newDatabaseConfig({VITE_NEW_FIREBASE_PROJECT_ID:'new'}),/completar/);
   const env=Object.fromEntries(['PROJECT_ID','API_KEY','APP_ID','AUTH_DOMAIN','DATABASE_ID'].map(k=>['VITE_NEW_FIREBASE_'+k,'synthetic']));
   assert.equal(newDatabaseConfig(env)?.databaseId,'synthetic'); env.VITE_NEW_FIREBASE_PROJECT_ID='chromatic-pride-0ttsj'; assert.throws(()=>newDatabaseConfig(env),/otro proyecto/);
+});
+test('confirmed default targets the new named database and partial overrides fail closed', () => {
+  const config = newDatabaseConfig(selectNewFirebaseEnv({}));
+  assert.equal(config?.projectId, 'gen-lang-client-0958943545');
+  assert.equal(config?.databaseId, 'encuestas-nuevas');
+  assert.deepEqual(selectNewFirebaseEnv({VITE_NEW_FIREBASE_PROJECT_ID: ''}), NEW_FIREBASE_ENV);
+  assert.throws(() => newDatabaseConfig(selectNewFirebaseEnv({VITE_NEW_FIREBASE_PROJECT_ID: 'other-project'})), /completar/);
+  assert.throws(() => newDatabaseConfig(selectNewFirebaseEnv({...NEW_FIREBASE_ENV, VITE_NEW_FIREBASE_PROJECT_ID: 'chromatic-pride-0ttsj'})), /otro proyecto/);
 });
 test('Firebase write path and token verification never use the historical project as a fallback', () => {
   const service=readFileSync('src/firebaseService.ts','utf8');
