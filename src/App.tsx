@@ -72,8 +72,9 @@ export default function App() {
   }, [isAdminAuthenticated]);
 
   useEffect(() => watchAdminSession(admin => {
-    ++syncGeneration.current;
-    setResponses([]);
+    // Initial signed-out notification must not invalidate the public load.
+    // Actual auth changes trigger syncData and its effect cleanup below.
+    if (!admin) setResponses([]);
     setIsAdminAuthenticated(admin);
   }), []);
 
