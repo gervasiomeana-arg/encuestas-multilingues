@@ -65,11 +65,20 @@ export async function prepareHistoricalSurveys(): Promise<number> {
   requireNewDatabase(); await requireAdmin();
   return repository.prepareHistoricalSurveys();
 }
+export async function enableSenegalSubmissions(): Promise<void> {
+  const target = requireNewDatabase();
+  await requireAdmin();
+  const surveys = await list(target, 'surveys');
+  if (!surveys.some(survey => survey.id === 'survey_senegal')) {
+    await repository.prepareHistoricalSurvey('survey_senegal');
+  }
+}
 export async function saveResponse(response: SurveyResponse): Promise<void> {
   const target = requireNewDatabase();
   // Public users cannot read response documents to perform a transaction. Rules allow create only.
   const parent = await getDoc(doc(target, 'surveys', response.surveyId));
   if (!parent.exists()) throw new Error('Esta encuesta aún no está habilitada para nuevos envíos. Contacta a administración; tus respuestas siguen en pantalla.');
+  if (!Object.keys(response.answers).length) throw new Error('Responde al menos una pregunta para enviar la encuesta. Las demás preguntas de Senegal son opcionales.');
   await setDoc(doc(target, 'responses', response.id), response);
 }
 export async function saveMultipleResponses(responses: SurveyResponse[]): Promise<number> {

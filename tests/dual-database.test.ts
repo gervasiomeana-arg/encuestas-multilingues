@@ -30,6 +30,19 @@ test('explicit historical preparation copies only definitions, repeats safely an
   await assert.rejects(repo.prepareHistoricalSurveys(),/conflict/); assert.equal(fresh.data.surveys.length,2);
   assert.deepEqual(old.data.responses,before.responses); assert.equal(old.writes,0);
 });
+test('Senegal provisioning copies only its original definition to the new store and cannot overwrite a conflict', async () => {
+  const definition = {id:'survey_senegal',title:'SENEGAL',questions:[{id:'q',required:true}],translations:{fr:{title:'SENEGAL'}}};
+  const old = store({surveys:[definition,{id:'survey_mali'}],responses:[{id:'historic-response'}]});
+  const fresh = store({}); const repo = new DualRepository(old,fresh); const before = structuredClone(old.data);
+  assert.equal(await repo.prepareHistoricalSurvey('survey_senegal'),1);
+  assert.equal(await repo.prepareHistoricalSurvey('survey_senegal'),0);
+  assert.deepEqual(fresh.data.surveys,[definition]); assert.deepEqual(fresh.data.responses,[]);
+  assert.deepEqual(old.data,before); assert.equal(old.writes,0);
+  fresh.data.surveys[0].title = 'Different';
+  await assert.rejects(repo.prepareHistoricalSurvey('survey_senegal'),/conflict/);
+  await assert.rejects(repo.prepareHistoricalSurvey('missing'),/No se encontró/);
+  assert.equal(fresh.data.surveys[0].title,'Different'); assert.equal(fresh.writes,1);
+});
 test('unconfigured writes never fall back to history; imports reject historical IDs and history outages', async () => {
   const old=store({responses:[{id:'old'}]}); const fresh=store({}); const repo=new DualRepository(old,fresh);
   await assert.rejects(repo.create('responses',[{id:'old'}]),/historial/); assert.equal(fresh.writes,0);

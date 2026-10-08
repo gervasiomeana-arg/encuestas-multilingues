@@ -59,6 +59,13 @@ export class DualRepository {
     if (!old.length || old.length > 250) throw new Error('La preparación requiere entre 1 y 250 encuestas históricas.');
     return target.create('surveys', old, true);
   }
+  async prepareHistoricalSurvey(id: string) {
+    const target = this.writable();
+    const old = await this.historical.list('surveys');
+    const survey = old.find(row => row.id === id);
+    if (!survey) throw new Error('No se encontró la definición histórica de la encuesta. No se modificó ningún registro.');
+    return target.create('surveys', [survey], true);
+  }
   assertComplete() {
     if (this.warnings.size) throw new Error('No se puede exportar un respaldo integral: falta consultar una base. Reintenta la sincronización.');
   }

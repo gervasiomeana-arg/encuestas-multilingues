@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { getAllSurveys, getAllResponses, databaseStatus, prepareHistoricalSurveys } from './firebaseService';
+import { getAllSurveys, getAllResponses, databaseStatus, prepareHistoricalSurveys, enableSenegalSubmissions } from './firebaseService';
 import { Survey, SurveyResponse } from './types';
 import { loginAdmin, logoutAdmin, watchAdminSession } from './authService';
 import Header from './components/Header';
@@ -53,7 +53,9 @@ export default function App() {
     setLoading(true);
     setLoadError('');
     try {
-      // Public sessions never fetch response documents. Opening the app never writes.
+      // Only a verified administrator can provision Senegal in the new database.
+      // Public sessions only read questionnaires and never write definitions.
+      if (isAdminAuthenticated) await enableSenegalSubmissions();
       const [allSurveys, allResponses] = await Promise.all([
         getAllSurveys(),
         isAdminAuthenticated ? getAllResponses() : Promise.resolve([])

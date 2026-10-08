@@ -327,7 +327,14 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
       await saveResponse(newResponse);
       setSubmittedSuccess(true);
     } catch (err: any) {
-      setFormError("Ocurrió un error al intentar enviar tu encuesta a la base de datos.");
+      const code = typeof err?.code === 'string' ? err.code : '';
+      setFormError(code.includes('permission-denied')
+        ? 'La base nueva rechazó el envío por sus permisos. Contacta a administración; tus respuestas siguen en pantalla.'
+        : code.includes('unavailable') || code.includes('deadline-exceeded')
+          ? 'No se pudo conectar con la base nueva. Tus respuestas siguen en pantalla; reintenta cuando vuelva la conexión.'
+          : !code && err instanceof Error
+            ? err.message
+            : 'No se pudo guardar la encuesta en la base nueva. Tus respuestas siguen en pantalla.');
     } finally {
       submissionInFlight.current = false;
       setSubmitting(false);
