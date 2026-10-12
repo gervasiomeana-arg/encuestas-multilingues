@@ -33,7 +33,8 @@ app.disable('x-powered-by');
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  // AI Studio embeds previews from a different origin. SAMEORIGIN blocks that integration.
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://aistudio.google.com https://*.ai.studio");
   if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
   next();
 });
