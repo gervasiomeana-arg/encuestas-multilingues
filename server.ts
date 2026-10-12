@@ -394,6 +394,10 @@ async function startServer() {
         ? clientPath
         : standardDistPath;
 
+    if (!fs.existsSync(path.join(distPath, "index.html"))) {
+      throw new Error('Falta la interfaz compilada. Ejecuta npm run build antes de npm start.');
+    }
+
     app.use((req, res, next) => {
       if (/\.(?:cjs|map)$/.test(req.path)) { res.sendStatus(404); return; }
       next();
@@ -410,4 +414,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(error => {
+  console.error('No se pudo iniciar el servidor:', error instanceof Error ? error.message : 'Error de arranque');
+  process.exitCode = 1;
+});
