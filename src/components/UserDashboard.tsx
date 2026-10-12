@@ -19,7 +19,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, COUNTRIES } from '../types';
 import { saveResponse } from '../firebaseService';
 import { translateSurveyWithAI } from '../utils/api';
-import { answerError, isQuestionRequired, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
+import { answerError, answerQuestionType, isQuestionRequired, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
 
 interface UserDashboardProps {
   surveys: Survey[];
@@ -248,7 +248,9 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
     const question = activeSurvey?.questions.find(q => q.id === qId);
     if (!activeSurvey || !question) return;
     try {
-      handleSetAnswer(qId, toggleChoices(activeSurvey, question, (currentAnswers[qId] as string[]) || [], option));
+      const value = currentAnswers[qId];
+      const selected = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+      handleSetAnswer(qId, toggleChoices(activeSurvey, question, selected, option));
       setFormError(null);
     } catch (error) { setFormError((error as Error).message); }
   };
@@ -650,7 +652,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                                       )}
 
                                       {/* SINGLE CHOICE TYPE */}
-                                      {q.type === 'single_choice' && (
+                                      {answerQuestionType(activeSurvey, q) === 'single_choice' && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
                                           {localizedOptions?.map((opt) => {
                                             const isSelected = optionMatches(activeSurvey, q, currentVal, opt);
@@ -683,7 +685,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                                       )}
 
                                       {/* MULTIPLE CHOICE TYPE */}
-                                      {q.type === 'multiple_choice' && (
+                                      {answerQuestionType(activeSurvey, q) === 'multiple_choice' && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
                                           {localizedOptions?.map((opt) => {
                                             const isSelected = Array.isArray(currentVal) && currentVal.some(value => optionMatches(activeSurvey, q, value, opt));
@@ -869,7 +871,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                               )}
 
                               {/* SINGLE CHOICE TYPE */}
-                              {q.type === 'single_choice' && (
+                              {answerQuestionType(activeSurvey, q) === 'single_choice' && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                                   {localizedOptions?.map((opt) => (
                                     <button
@@ -893,7 +895,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                               )}
 
                               {/* MULTIPLE CHOICE TYPE */}
-                              {q.type === 'multiple_choice' && (
+                              {answerQuestionType(activeSurvey, q) === 'multiple_choice' && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                                   {localizedOptions?.map((opt) => {
                                     const isSelected = Array.isArray(currentVal) && currentVal.some(value => optionMatches(activeSurvey, q, value, opt));

@@ -50,14 +50,22 @@ export function isQuestionRequired(survey: Survey, question: SurveyQuestion): bo
   return !isSenegal && question.required;
 }
 
+// Override only the live form; never alter stored questionnaire types or old answers.
+const SENEGAL_MULTISELECT_IDS = new Set(['s15', 's20', 's23', 's37', 's39']);
+export function answerQuestionType(survey: Survey, question: SurveyQuestion): SurveyQuestion['type'] {
+  return survey.id === 'survey_senegal' && SENEGAL_MULTISELECT_IDS.has(question.id) &&
+    question.type === 'single_choice' ? 'multiple_choice' : question.type;
+}
+
 export function answerError(survey: Survey, question: SurveyQuestion, value: unknown): string | null {
+  const type = answerQuestionType(survey, question);
   const empty = value === undefined || value === null ||
     (typeof value === 'string' && value.trim() === '') || (Array.isArray(value) && value.length === 0);
   if (empty) return isQuestionRequired(survey, question) ? 'Completa esta pregunta obligatoria.' : null;
-  if (question.type === 'text') return typeof value === 'string' ? null : 'Escribe una respuesta de texto.';
-  if (question.type === 'rating') return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10 ? null : 'Elige un puntaje entre 1 y 10.';
-  if (question.type === 'boolean') return value === 'Sí' || value === 'No' ? null : 'Elige Sí o No.';
-  if (question.type === 'single_choice') {
+  if (type === 'text') return typeof value === 'string' ? null : 'Escribe una respuesta de texto.';
+  if (type === 'rating') return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 10 ? null : 'Elige un puntaje entre 1 y 10.';
+  if (type === 'boolean') return value === 'Sí' || value === 'No' ? null : 'Elige Sí o No.';
+  if (type === 'single_choice') {
     const index = optionIndex(survey, question, value);
     if (index < 0) return 'Selecciona una de las opciones disponibles.';
     if (/aceptas? participar|acepta participar|(?:aceptaci[oó]n|consentimiento) (?:de |para |a )?(?:participar|participaci[oó]n)/i.test(question.text)) {
@@ -66,7 +74,7 @@ export function answerError(survey: Survey, question: SurveyQuestion, value: unk
     }
     return null;
   }
-  if (question.type === 'multiple_choice') {
+  if (type === 'multiple_choice') {
     if (!Array.isArray(value)) return 'Selecciona opciones de la lista.';
     const indexes = value.map(item => optionIndex(survey, question, item));
     if (indexes.some(index => index < 0) || new Set(indexes).size !== indexes.length) return 'Hay opciones inválidas o repetidas.';

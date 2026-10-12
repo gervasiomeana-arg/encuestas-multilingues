@@ -1,11 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAURITANIA_SURVEY as survey } from '../src/utils/mauritaniaDefaultSurvey';
-import { answerError, toggleChoices, optionMatches, translationCoverage } from '../src/utils/surveyValidation';
+import { answerError, answerQuestionType, toggleChoices, optionMatches, translationCoverage } from '../src/utils/surveyValidation';
 import { parseRawTextToSurveyVerbatim } from '../src/utils/surveyParser';
 import { validSurveyDraft, validTranslationRequest, validQuestions } from '../src/utils/apiValidation';
 
 const question = (id: string) => survey.questions.find(q => q.id === id)!;
+
+test('five Senegal questions allow multiple new selections without changing stored definitions or old answers', () => {
+  const ids = ['s15','s20','s23','s37','s39'];
+  const questions = [...ids,'s16'].map(id => ({id,text:'Pregunta',type:'single_choice' as const,required:true,options:['A','B','C']}));
+  const senegal = {...survey,id:'survey_senegal',title:'SENEGAL',questions,
+    translations:{fr:{title:'SENEGAL',description:'',questions:Object.fromEntries(questions.map(q=>[q.id,{text:'Question',options:['Un','Deux','Trois']}]))}}};
+  const historical = {answers:{s15:'A',s20:'B'}};
+  const before = structuredClone({senegal,historical});
+  for (const q of questions.slice(0,5)) {
+    assert.equal(answerQuestionType(senegal,q),'multiple_choice');
+    let chosen = toggleChoices(senegal,q,[],'A');
+    chosen = toggleChoices(senegal,q,chosen,'Deux');
+    assert.deepEqual(chosen,['A','Deux']);
+    assert.equal(answerError(senegal,q,chosen),null);
+    assert.deepEqual(toggleChoices(senegal,q,chosen,'A'),['Deux']);
+    assert.ok(answerError(senegal,q,['A','Invalid']));
+    assert.ok(answerError(senegal,q,['A','Un']));
+    assert.equal(answerQuestionType({...senegal,id:'survey_mali'},q),'single_choice');
+  }
+  assert.equal(answerQuestionType(senegal,questions[5]),'single_choice');
+  assert.ok(answerError(senegal,questions[5],['A','B']));
+  assert.deepEqual({senegal,historical},before);
+});
 
 test('refusal of consent is blocked in original and translated options', () => {
   const q = question('m1');
