@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import multer from "multer";
 import mammoth from "mammoth";
 import dotenv from "dotenv";
@@ -8,11 +9,11 @@ import { GoogleGenAI } from "@google/genai";
 import * as pdf from "pdf-parse";
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { requireAdministrator, createApiLimiter, apiErrorHandler } from './serverSecurity';
-import { parseRawTextToSurveyVerbatim } from './src/utils/surveyParser';
-import { validSurveyDraft, validTranslationRequest } from './src/utils/apiValidation';
-import { translationCoverage } from './src/utils/surveyValidation';
-import { NEW_FIREBASE_ENV } from './src/newFirebaseConfig';
+import { requireAdministrator, createApiLimiter, apiErrorHandler } from './serverSecurity.ts';
+import { parseRawTextToSurveyVerbatim } from './src/utils/surveyParser.ts';
+import { validSurveyDraft, validTranslationRequest } from './src/utils/apiValidation.ts';
+import { translationCoverage } from './src/utils/surveyValidation.ts';
+import { NEW_FIREBASE_ENV } from './src/newFirebaseConfig.ts';
 
 // Ensure environment variables are loaded in local developer environment
 dotenv.config();
@@ -357,6 +358,11 @@ app.post('/api/admin-session', createApiLimiter(10, 60_000), (req, res) => {
   });
 });
 
+// Health check endpoints for Cloud Run / AI Studio deploy probes
+app.get(['/health', '/_health', '/api/health'], (_req, res) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
 // -------------------------------------------------------------------------
 // VITE OR STATIC FRONTEND SERVING
 // -------------------------------------------------------------------------
@@ -366,7 +372,12 @@ app.use('/api', (_req, res) => {
 app.use(apiErrorHandler);
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const isDev = process.env.npm_lifecycle_event === "dev" || process.argv.includes("--dev");
+  const hasDist = fs.existsSync(path.join(process.cwd(), "dist", "index.html")) ||
+                  fs.existsSync(path.join(process.cwd(), "dist", "client", "index.html"));
+  const isProduction = !isDev && (process.env.NODE_ENV === "production" || process.env.npm_lifecycle_event === "start" || hasDist);
+
+  if (!isProduction) {
     // Development mode: mount Vite dev middleware
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -374,8 +385,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // Production mode: serve built client assets from /dist
-    const distPath = path.join(process.cwd(), "dist", "client");
+    // Production mode: serve built client assets from /dist or /dist/client
+    const clientPath = path.join(process.cwd(), "dist", "client");
+    const standardDistPath = path.join(process.cwd(), "dist");
+    const distPath = fs.existsSync(path.join(standardDistPath, "index.html"))
+      ? standardDistPath
+      : fs.existsSync(path.join(clientPath, "index.html"))
+        ? clientPath
+        : standardDistPath;
+
     app.use((req, res, next) => {
       if (/\.(?:cjs|map)$/.test(req.path)) { res.sendStatus(404); return; }
       next();
@@ -386,9 +404,9 @@ async function startServer() {
     });
   }
 
-  // Bind to 0.0.0.0 and port 3000 as required
+  // Bind to 0.0.0.0 and port as required by Cloud Run or dev environment
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server is running on http://localhost:${PORT} [NODE_ENV=${process.env.NODE_ENV || "development"}]`);
+    console.log(`Server is running on http://0.0.0.0:${PORT} [NODE_ENV=${process.env.NODE_ENV || "development"}]`);
   });
 }
 
