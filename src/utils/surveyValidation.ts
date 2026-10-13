@@ -51,7 +51,7 @@ export function isQuestionRequired(survey: Survey, question: SurveyQuestion): bo
 }
 
 // Override only the live form; never alter stored questionnaire types or old answers.
-const SENEGAL_MULTISELECT_IDS = new Set(['s15', 's20', 's23', 's37', 's39']);
+const SENEGAL_MULTISELECT_IDS = new Set(['s13', 's15', 's20', 's23', 's37', 's39']);
 export function answerQuestionType(survey: Survey, question: SurveyQuestion): SurveyQuestion['type'] {
   return survey.id === 'survey_senegal' && SENEGAL_MULTISELECT_IDS.has(question.id) &&
     question.type === 'single_choice' ? 'multiple_choice' : question.type;
