@@ -2,6 +2,7 @@ export type QuestionType = 'text' | 'rating' | 'multiple_choice' | 'single_choic
 
 export interface SurveyQuestion {
   id: string;
+  displayNumber?: string; // Optional source numbering, including matrix rows such as 17.1.
   text: string;
   type: QuestionType;
   options?: string[]; // Used for multiple_choice and single_choice

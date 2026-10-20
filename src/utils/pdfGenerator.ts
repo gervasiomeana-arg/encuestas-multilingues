@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import { Survey, SurveyQuestion, SurveyResponse } from '../types';
 import { getQuestionTypeLabelES } from './answerTranslator';
 import { ratingScore } from './dataProtection';
+import { questionLabel } from './questionLabel';
 
 const PALETTE = [
   [79, 70, 229],   // #4f46e5 (indigo-600)
@@ -210,7 +211,7 @@ export function generateSurveyPDF(params: PDFGenerationParams): GeneratedPDFResu
 
     // Calculate title height
     const maxTitleWidth = contentWidth - badgeWidth - 35;
-    const splitTitle = doc.splitTextToSize(`P${idx + 1}. ${q.text}`, maxTitleWidth);
+    const splitTitle = doc.splitTextToSize(`${questionLabel(q, idx)}. ${q.text}`, maxTitleWidth);
     const titleHeight = Math.max(16, splitTitle.length * 12);
     
     // Calculate content inner height dynamically

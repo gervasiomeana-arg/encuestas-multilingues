@@ -5,6 +5,7 @@ import { requireAdmin } from './authService';
 import { validateResponseBatch } from './utils/dataProtection';
 import { Survey, SurveyResponse } from './types';
 import { DualRepository, canonical, CollectionName, StoredRecord, WriteStore } from './utils/dualDatabase';
+import { addOccupiedTerritories } from './utils/occupiedTerritories';
 
 async function list(database: Firestore, name: CollectionName): Promise<StoredRecord[]> {
   const readPromise = getDocs(collection(database, name)).then(snapshot =>
@@ -60,6 +61,10 @@ export async function getSurveyById(id: string): Promise<Survey | null> {
 export async function saveSurvey(survey: Survey): Promise<void> {
   requireNewDatabase(); await requireAdmin();
   await repository.create('surveys', [survey as unknown as StoredRecord]);
+}
+export async function addOccupiedTerritoriesSurvey(): Promise<number> {
+  requireNewDatabase(); await requireAdmin();
+  return addOccupiedTerritories(repository);
 }
 export async function prepareHistoricalSurveys(): Promise<number> {
   requireNewDatabase(); await requireAdmin();

@@ -1,4 +1,5 @@
 import { databaseStatus, assertCompleteBackup } from '../firebaseService';
+import { questionLabel } from '../utils/questionLabel';
 import React, { useState, useMemo, useRef } from 'react';
 import { 
   BarChart, 
@@ -373,7 +374,7 @@ export default function AdminReports({ surveys, responses, onSurveyDeleted, onEd
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
           <h5 className="font-bold text-slate-900 text-sm flex items-start gap-2.5">
             <span className="text-indigo-600 font-mono text-xs bg-indigo-50 px-2 py-0.5 rounded-md font-bold shrink-0">
-              P{index + 1}
+              {questionLabel(q, index)}
             </span>
             <span className="leading-snug">{q.text}</span>
           </h5>

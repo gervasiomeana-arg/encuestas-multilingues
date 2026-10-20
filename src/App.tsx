@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
-import { getAllSurveys, getAllResponses, databaseStatus, prepareHistoricalSurveys, enableSenegalSubmissions } from './firebaseService';
+import { getAllSurveys, getAllResponses, databaseStatus, prepareHistoricalSurveys, enableSenegalSubmissions, addOccupiedTerritoriesSurvey } from './firebaseService';
 import { Survey, SurveyResponse } from './types';
 import { loginAdmin, logoutAdmin, watchAdminSession } from './authService';
 import Header from './components/Header';
@@ -282,6 +282,16 @@ export default function App() {
 
                   <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2">
                     <p>Historial antiguo en modo lectura. Todas las encuestas y respuestas nuevas se guardan en la base nueva.</p>
+                    <button disabled={preparing || !storage.configured} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50" onClick={async () => {
+                      if (prepareInFlight.current) return;
+                      prepareInFlight.current = true; setPreparing(true); setPrepareMessage('');
+                      try {
+                        const count = await addOccupiedTerritoriesSurvey();
+                        setPrepareMessage(count ? 'Se agregó Territorios Ocupados del Sáhara Occidental. Las encuestas y respuestas anteriores se conservaron.' : 'La nueva encuesta ya estaba agregada. No se duplicó ni modificó ningún registro.');
+                        await syncData();
+                      } catch (error) { setPrepareMessage(error instanceof Error ? error.message : 'No se pudo agregar la encuesta. Reintenta.'); }
+                      finally { prepareInFlight.current = false; setPreparing(false); }
+                    }}>{preparing ? 'Procesando…' : 'Agregar encuesta Territorios Ocupados del Sáhara'}</button>
                     <p>Respuestas por origen: históricas {Object.values(storage.origins.responses).filter(o => o === 'histórica').length}, nuevas {Object.values(storage.origins.responses).filter(o => o === 'nueva').length}, coincidentes en ambas {Object.values(storage.origins.responses).filter(o => o === 'ambas').length}.</p>
                     <button disabled={preparing || !storage.configured} className="rounded-lg bg-indigo-600 px-4 py-2 text-white disabled:opacity-50" onClick={async () => {
                       if (prepareInFlight.current) return;

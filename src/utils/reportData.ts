@@ -1,6 +1,7 @@
 import type { Survey, SurveyResponse } from '../types';
 import { csvCell, ratingScore } from './dataProtection';
 import { normalizeAnswerToSpanish } from './answerTranslator';
+import { questionLabel } from './questionLabel';
 
 export function ratingDistribution(values: unknown[]) {
   const scores = values.map(ratingScore).filter((value): value is number => value !== null);
@@ -16,7 +17,8 @@ export function ratingDistribution(values: unknown[]) {
 export function surveyReportCSV(survey: Survey, responses: SurveyResponse[]): string {
   const headers = ['ID Respuesta', 'Fecha Original', 'Participante', 'Idioma Original', 'País'];
   survey.questions.forEach((question, index) => {
-    headers.push(`P${index + 1} Original: ${question.text}`, `P${index + 1} Normalizada: ${question.text}`);
+    const label = questionLabel(question, index);
+    headers.push(`${label} Original: ${question.text}`, `${label} Normalizada: ${question.text}`);
   });
   const rows = responses.map(response => {
     const row = [response.id, response.submittedAt, response.userName, response.userLanguage, response.userCountry ?? ''];

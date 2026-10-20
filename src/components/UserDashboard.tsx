@@ -20,6 +20,7 @@ import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, COUNTRIES } from '../types
 import { saveResponse } from '../firebaseService';
 import { translateSurveyWithAI } from '../utils/api';
 import { answerError, answerQuestionType, isQuestionRequired, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
+import { OCCUPIED_TERRITORIES_ID, occupiedTerritoriesAnswers } from '../utils/occupiedTerritories';
 
 interface UserDashboardProps {
   surveys: Survey[];
@@ -322,7 +323,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
         userName: userName.trim(),
         userLanguage: userLang,
         ...(activeSurvey.targetCountry ? { userCountry: activeSurvey.targetCountry } : {}),
-        answers: currentAnswers,
+        answers: occupiedTerritoriesAnswers(activeSurvey, currentAnswers),
         submittedAt: new Date().toISOString()
       };
 
@@ -785,6 +786,13 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                   ) : (
                     /* ORIGINAL FULL SCROLL FORM STYLE */
                     <>
+                      {activeSurvey.id === OCCUPIED_TERRITORIES_ID && (
+                        <p className="text-sm text-slate-600">
+                          {userLang === 'fr'
+                            ? 'La participation est volontaire. Après avoir accepté de participer, vous pouvez répondre à toutes les questions ou seulement à certaines et envoyer vos réponses.'
+                            : 'La participación es voluntaria. Después de aceptar participar, puedes responder todas las preguntas o solo algunas y enviar tus respuestas.'}
+                        </p>
+                      )}
                       <div className="space-y-6">
                         {activeSurvey.questions.map((q, index) => {
                           const localizedQuestionText = tempLang.getQuestionText(q.id, q.text);
@@ -795,7 +803,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                             <div key={q.id} className="p-5 rounded-2xl bg-slate-50/50 border border-slate-100 hover:border-slate-200/80 transition-all space-y-3">
                               <div className="flex justify-between items-start">
                                 <h4 className="text-sm font-semibold text-slate-800 flex items-start gap-2">
-                                  <span className="text-slate-400 font-mono text-xs mt-0.5">{index + 1}.</span>
+                                  <span className="text-slate-400 font-mono text-xs mt-0.5">{q.displayNumber ?? index + 1}.</span>
                                   <span>{localizedQuestionText}</span>
                                 </h4>
                                 {isQuestionRequired(activeSurvey, q) && (
