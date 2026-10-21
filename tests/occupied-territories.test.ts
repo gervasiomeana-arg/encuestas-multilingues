@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OCCUPIED_TERRITORIES_SURVEY as survey } from '../src/utils/occupiedTerritoriesSurvey';
-import { addOccupiedTerritories, occupiedTerritoriesAnswers } from '../src/utils/occupiedTerritories';
+import { addOccupiedTerritories, occupiedTerritoriesAnswers, withOccupiedTerritoriesArabic } from '../src/utils/occupiedTerritories';
+import { occupiedTerritoriesUI } from '../src/utils/occupiedTerritoriesUI';
 import { DualRepository, canonical, type StoredRecord } from '../src/utils/dualDatabase';
 import { answerError, translationCoverage } from '../src/utils/surveyValidation';
 import { validSurveyDraft } from '../src/utils/apiValidation';
@@ -112,4 +113,53 @@ test('name or ID conflicts and unavailable history prevent duplicate creation wi
   const offline = { async list() { throw new Error('offline'); } };
   await assert.rejects(addOccupiedTerritories(new DualRepository(offline, current)), /comprobar/);
   assert.equal(current.data.surveys.length, 0);
+});
+
+test('Arabic display is complete and every choice maps back to the same Spanish option without rewriting the source', () => {
+  const stored = structuredClone(survey);
+  const before = structuredClone(stored);
+  const display = withOccupiedTerritoriesArabic(stored);
+  assert.deepEqual(translationCoverage(display, display.translations.haa), {translated:30,total:30,complete:true});
+  assert.match(display.translations.haa.title, /[\u0600-\u06ff]/);
+  assert.match(display.translations.haa.description, /[\u0600-\u06ff]/);
+  for (const q of display.questions) {
+    const arabic = display.translations.haa.questions[q.id];
+    assert.doesNotMatch(arabic.text, /[a-zA-ZáéíóúñÁÉÍÓÚÑ]/, q.id);
+    for (const [index, option] of (arabic.options || []).entries()) {
+      assert.doesNotMatch(option, /[a-zA-ZáéíóúñÁÉÍÓÚÑ]/, q.id);
+      assert.equal(normalizeAnswerToSpanish(option, q, display), q.options![index], `${q.id}:${index}`);
+      if (q.id === 'to_consent' && index !== 0) continue;
+      const value = q.type === 'multiple_choice' ? [option] : option;
+      const raw = { to_consent: display.translations.haa.questions.to_consent.options![0], to_1: display.translations.haa.questions.to_1.options![0], [q.id]: value };
+      const previous = structuredClone(raw);
+      assert.equal(answerError(display,q,value),null);
+      const result = occupiedTerritoriesAnswers(display,raw);
+      assert.deepEqual(result[q.id],q.type === 'multiple_choice' ? [q.options![index]] : q.options![index]);
+      assert.deepEqual(raw,previous);
+    }
+  }
+  assert.deepEqual(stored,before);
+  assert.equal(stored.translations.haa,undefined);
+  assert.deepEqual(display.questions,stored.questions);
+  for (const value of Object.values(occupiedTerritoriesUI(survey.id,'haa')!)) assert.doesNotMatch(value,/[a-zA-ZáéíóúñÁÉÍÓÚÑ]/);
+  assert.equal(occupiedTerritoriesUI('survey_senegal','haa'),undefined);
+});
+
+test('display overlay never changes stored snapshots or breaks repeat-add checks; different questionnaires are not overlaid', async () => {
+  const old = memory([]);
+  const fresh = memory([]);
+  const repository = new DualRepository(old,fresh);
+  assert.equal(await addOccupiedTerritories(repository),1);
+  const stored = (await repository.list('surveys'))[0] as unknown as typeof survey;
+  const snapshot = structuredClone(fresh.data);
+  withOccupiedTerritoriesArabic(stored);
+  assert.deepEqual(fresh.data,snapshot);
+  assert.equal(await addOccupiedTerritories(repository),0);
+  assert.equal((fresh.data.surveys[0].translations as typeof survey.translations).haa,undefined);
+  const other = {...survey,id:'survey_rasd'};
+  assert.equal(withOccupiedTerritoriesArabic(other),other);
+  const changed = structuredClone(survey);
+  changed.questions[2].options!.reverse();
+  assert.equal(withOccupiedTerritoriesArabic(changed),changed);
+  assert.equal(changed.translations.haa,undefined);
 });

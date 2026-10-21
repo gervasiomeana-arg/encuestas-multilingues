@@ -2,8 +2,20 @@ import type { Survey, SurveyResponse } from '../types';
 import { canonical, DualRepository, type StoredRecord } from './dualDatabase';
 import { optionIndex } from './surveyValidation';
 import { OCCUPIED_TERRITORIES_SURVEY } from './occupiedTerritoriesSurvey';
+import { OCCUPIED_TERRITORIES_ARABIC } from './occupiedTerritoriesArabic';
 
 export const OCCUPIED_TERRITORIES_ID = OCCUPIED_TERRITORIES_SURVEY.id;
+
+// Overlay only the matching original questionnaire in memory. Stored definitions and answers stay intact.
+export function withOccupiedTerritoriesArabic(survey: Survey): Survey {
+  if (survey.id !== OCCUPIED_TERRITORIES_ID ||
+    canonical(survey.questions) !== canonical(OCCUPIED_TERRITORIES_SURVEY.questions)) return survey;
+  const current = survey.translations?.haa;
+  return { ...survey, translations: { ...survey.translations, haa: {
+    ...OCCUPIED_TERRITORIES_ARABIC,
+    questions: { ...current?.questions, ...OCCUPIED_TERRITORIES_ARABIC.questions }
+  } } };
+}
 
 export function isOccupiedTerritoriesTitle(title: string): boolean {
   const normalized = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();

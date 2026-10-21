@@ -20,7 +20,8 @@ import { Survey, SurveyResponse, AVAILABLE_LANGUAGES, COUNTRIES } from '../types
 import { saveResponse } from '../firebaseService';
 import { translateSurveyWithAI } from '../utils/api';
 import { answerError, answerQuestionType, isQuestionRequired, optionMatches, toggleChoices, translationCoverage } from '../utils/surveyValidation';
-import { OCCUPIED_TERRITORIES_ID, occupiedTerritoriesAnswers } from '../utils/occupiedTerritories';
+import { OCCUPIED_TERRITORIES_ID, occupiedTerritoriesAnswers, withOccupiedTerritoriesArabic } from '../utils/occupiedTerritories';
+import { occupiedTerritoriesUI, occupiedTerritoriesError } from '../utils/occupiedTerritoriesUI';
 
 interface UserDashboardProps {
   surveys: Survey[];
@@ -50,6 +51,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
 
   // Stepper state for Survio format
   const [currentStep, setCurrentStep] = useState(0);
+  const territoryUI = occupiedTerritoriesUI(activeSurvey?.id, userLang);
 
   useEffect(() => {
     if (onActiveStateChange) {
@@ -201,7 +203,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
   // Switch Active survey to start answering
   const handleSelectSurvey = (survey: Survey) => {
     setFormError(null);
-    setActiveSurvey(sessionSurveys[survey.id] || survey);
+    setActiveSurvey(withOccupiedTerritoriesArabic(sessionSurveys[survey.id] || survey));
     setCurrentAnswers({});
     setSubmittedSuccess(false);
     setCurrentStep(0);
@@ -209,7 +211,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
 
   // Helper to extract localized text (falls back to original if selected language isn't available)
   const getLocalizedContent = (survey: Survey) => {
-    survey = sessionSurveys[survey.id] || survey;
+    survey = withOccupiedTerritoriesArabic(sessionSurveys[survey.id] || survey);
     const hasTranslation = survey.translations && survey.translations[userLang];
     const data = hasTranslation ? survey.translations[userLang] : {
       title: survey.title,
@@ -288,6 +290,10 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
     if (!activeSurvey || submissionInFlight.current || submittedSuccess) return;
 
     const localized = getLocalizedContent(activeSurvey);
+    if (territoryUI && userLang === 'haa' && !localized.isTranslated) {
+      setFormError(territoryUI.unavailable);
+      return;
+    }
 
     // If survey is Mauritania Survey II (Survio Style), run block-by-block validations
     if (activeSurvey.id === 'survey_mauritania_dos') {
@@ -302,11 +308,11 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
       const missingFields: string[] = [];
       activeSurvey.questions.forEach(q => {
         const error = answerError(activeSurvey, q, currentAnswers[q.id]);
-        if (error) missingFields.push(`${localized.getQuestionText(q.id, q.text)}: ${error}`);
+        if (error) missingFields.push(`${localized.getQuestionText(q.id, q.text)}: ${territoryUI ? (q.id === 'to_consent' ? territoryUI.consentError : territoryUI.invalid) : error}`);
       });
 
       if (missingFields.length > 0) {
-        setFormError(`Por favor completa las siguientes preguntas obligatorias:\n- ${missingFields.join('\n- ')}`);
+        setFormError(`${territoryUI?.review || 'Por favor completa las siguientes preguntas obligatorias:'}\n- ${missingFields.join('\n- ')}`);
         window.scrollTo({ top: 300, behavior: 'smooth' });
         return;
       }
@@ -331,6 +337,11 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
       setSubmittedSuccess(true);
     } catch (err: any) {
       const code = typeof err?.code === 'string' ? err.code : '';
+      if (territoryUI) {
+        setFormError(code.includes('permission-denied') ? territoryUI.permissionError
+          : code.includes('unavailable') || code.includes('deadline-exceeded') ? territoryUI.networkError
+          : occupiedTerritoriesError(err?.message || '', userLang));
+      } else {
       setFormError(code.includes('permission-denied')
         ? 'La base nueva rechazó el envío por sus permisos. Contacta a administración; tus respuestas siguen en pantalla.'
         : code.includes('unavailable') || code.includes('deadline-exceeded')
@@ -338,6 +349,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
           : !code && err instanceof Error
             ? err.message
             : 'No se pudo guardar la encuesta en la base nueva. Tus respuestas siguen en pantalla.');
+      }
     } finally {
       submissionInFlight.current = false;
       setSubmitting(false);
@@ -345,20 +357,21 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
   };
 
   return (
-    <div className="space-y-8" id="user-dashboard-wrapper">
+    <div className="space-y-8" id="user-dashboard-wrapper" lang={territoryUI ? (userLang === 'haa' ? 'ar' : userLang) : undefined} dir={territoryUI && userLang === 'haa' ? 'rtl' : undefined}>
       
       {/* SECTION 1: SYSTEM LANGUAGE */}
       {!submittedSuccess && (
         <section className="bg-white p-6 rounded-2xl border border-slate-205 shadow-xs max-w-xl mx-auto" id="user-profile-card">
           <h2 className="text-base font-bold font-display text-slate-800 mb-2 flex items-center justify-center gap-2">
             <Globe className="w-5 h-5 text-indigo-600 animate-pulse" />
-            <span>Idioma de la Encuesta / Choose Language</span>
+            <span>{territoryUI?.languageTitle || 'Idioma de la Encuesta / Choose Language'}</span>
           </h2>
           <p className="text-slate-500 text-xs text-center mb-4">
-            Selecciona tu idioma para responder la encuesta / Select your language for the survey
+            {territoryUI?.languageIntro || 'Selecciona tu idioma para responder la encuesta / Select your language for the survey'}
           </p>
           <div className="relative max-w-xs mx-auto">
             <select
+              aria-label={territoryUI?.languageTitle || 'Idioma de la Encuesta / Choose Language'}
               disabled={submitting}
               value={userLang}
               onChange={(e) => {
@@ -368,7 +381,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
               className="w-full pl-10 pr-10 py-3 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-4 focus:ring-indigo-100 focus:border-indigo-600 transition-all text-sm font-semibold text-slate-700 bg-slate-50/50 appearance-none cursor-pointer text-center"
             >
               {AVAILABLE_LANGUAGES.map(lang => (
-                <option key={lang.code} value={lang.code}>{lang.name}</option>
+                <option key={lang.code} value={lang.code}>{territoryUI && lang.code === 'haa' ? 'العربية / الحسانية' : lang.name}</option>
               ))}
             </select>
             <span className="absolute left-3.5 top-3.5 text-slate-400">
@@ -380,14 +393,14 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
 
       {activeSurvey && (() => {
         const content = getLocalizedContent(activeSurvey);
-        return !content.isTranslated && <div role="status" className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">
-          Traducción disponible: {content.coverage.translated} de {content.coverage.total} preguntas. Las restantes aparecen en el idioma original.
+        return !content.isTranslated && !(territoryUI && userLang === 'haa') && <div role="status" className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-900">
+          {territoryUI ? territoryUI.incomplete : `Traducción disponible: ${content.coverage.translated} de ${content.coverage.total} preguntas. Las restantes aparecen en el idioma original.`}
           <button type="button" onClick={() => handleDynamicTranslation(activeSurvey, userLang)} disabled={translatingId === activeSurvey.id} className="ml-2 underline font-semibold">
-            {translatingId === activeSurvey.id ? 'Traduciendo…' : 'Completar traducción de esta sesión'}
+            {translatingId === activeSurvey.id ? (territoryUI?.translating || 'Traduciendo…') : (territoryUI?.complete || 'Completar traducción de esta sesión')}
           </button>
         </div>;
       })()}
-      {translateError && <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{translateError}</div>}
+      {translateError && <div role="alert" className="rounded-xl bg-red-50 p-4 text-red-800">{territoryUI?.translationError || translateError}</div>}
 
       {/* Global general error banner */}
       {formError && (
@@ -399,6 +412,10 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
 
       {/* SECTION 2: VIEW OR FILL ACTIVE SURVEY */}
       {activeSurvey ? (
+        <>
+        {territoryUI && userLang === 'haa' && !getLocalizedContent(activeSurvey).isTranslated ? (
+          <div role="alert" className="rounded-xl bg-orange-50 p-4 text-orange-900">{territoryUI.unavailable}</div>
+        ) : (
         <div className="bg-white rounded-3xl border border-slate-200 shadow-md overflow-hidden card-transition" id="answering-survey-canvas" dir={userLang === 'haa' ? 'rtl' : 'ltr'}>
           
           {/* Active Survey Header */}
@@ -414,7 +431,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                     <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
                       <div className="flex-1 min-w-0">
                         <span className="inline-block md:hidden bg-indigo-500/20 text-indigo-200 font-mono text-[9px] uppercase font-bold tracking-widest px-2.5 py-0.5 rounded-md border border-indigo-400/20 mb-2">
-                          🇵🇹 {activeSurvey.targetCountry}
+                          {territoryUI?.region || `🇵🇹 ${activeSurvey.targetCountry}`}
                         </span>
                         <h2 className="text-lg md:text-2xl font-bold font-display tracking-tight text-white leading-snug">
                           {tempLang.title}
@@ -426,7 +443,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
 
                       <div className="flex flex-wrap items-center md:items-end gap-2 shrink-0">
                         <span className="hidden md:inline-block bg-indigo-500/20 text-indigo-200 font-mono text-[10px] uppercase font-bold tracking-widest px-2.5 py-1 rounded-full border border-indigo-400/25">
-                          País Destino: {activeSurvey.targetCountry}
+                          {territoryUI ? `${territoryUI.regionLabel}: ${territoryUI.region}` : `País Destino: ${activeSurvey.targetCountry}`}
                         </span>
                         {!tempLang.isTranslated ? (
                           <button
@@ -438,19 +455,19 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                             {translatingId === activeSurvey.id ? (
                               <>
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>Traduciendo...</span>
+                                <span>{territoryUI?.translating || 'Traduciendo...'}</span>
                               </>
                             ) : (
                               <>
                                 <Sparkles className="w-3.5 h-3.5 text-purple-200" />
-                                <span>Traducir al {userLangName}</span>
+                                <span>{territoryUI?.translate || `Traducir al ${userLangName}`}</span>
                               </>
                             )}
                           </button>
                         ) : (
                           <span className="bg-emerald-500/25 text-emerald-300 border border-emerald-400/20 font-mono text-[9px] md:text-[10px] uppercase font-bold tracking-widest px-2.5 py-1.5 rounded-xl flex items-center gap-1.5">
                             <Sparkles className="w-3.5 h-3.5" />
-                            Idioma disponible
+                            {territoryUI?.languageAvailable || 'Idioma disponible'}
                           </span>
                         )}
                       </div>
@@ -467,7 +484,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                       <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center border border-emerald-200 shadow-xs">
                         <CheckCircle className="w-8 h-8" />
                       </div>
-                      <h3 className="text-xl font-bold text-slate-800">GRACIAS POR PARTICIPAR EN NUESTRA ENCUESTA</h3>
+                      <h3 className="text-xl font-bold text-slate-800">{territoryUI?.thanks || 'GRACIAS POR PARTICIPAR EN NUESTRA ENCUESTA'}</h3>
                       
                       <div className="pt-4 flex gap-3">
                         <button
@@ -480,7 +497,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                           }}
                           className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer"
                         >
-                          Volver a las encuestas
+                          {territoryUI?.back || 'Volver a las encuestas'}
                         </button>
                       </div>
                     </div>
@@ -788,9 +805,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                     <>
                       {activeSurvey.id === OCCUPIED_TERRITORIES_ID && (
                         <p className="text-sm text-slate-600">
-                          {userLang === 'fr'
-                            ? 'La participation est volontaire. Après avoir accepté de participer, vous pouvez répondre à toutes les questions ou seulement à certaines et envoyer vos réponses.'
-                            : 'La participación es voluntaria. Después de aceptar participar, puedes responder todas las preguntas o solo algunas y enviar tus respuestas.'}
+                          {territoryUI!.participation}
                         </p>
                       )}
                       <div className="space-y-6">
@@ -803,12 +818,12 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                             <div key={q.id} className="p-5 rounded-2xl bg-slate-50/50 border border-slate-100 hover:border-slate-200/80 transition-all space-y-3">
                               <div className="flex justify-between items-start">
                                 <h4 className="text-sm font-semibold text-slate-800 flex items-start gap-2">
-                                  <span className="text-slate-400 font-mono text-xs mt-0.5">{q.displayNumber ?? index + 1}.</span>
+                                  <span className="text-slate-400 font-mono text-xs mt-0.5">{q.displayNumber === 'Consentimiento' && territoryUI ? territoryUI.consent : q.displayNumber === 'Fecha' && territoryUI ? territoryUI.date : q.displayNumber ?? index + 1}.</span>
                                   <span>{localizedQuestionText}</span>
                                 </h4>
                                 {isQuestionRequired(activeSurvey, q) && (
                                   <span className="text-[10px] text-red-500 font-bold tracking-widest uppercase bg-red-50 border border-red-100 px-2 py-0.5 rounded-md">
-                                    Requerido
+                                    {territoryUI?.required || 'Requerido'}
                                   </span>
                                 )}
                               </div>
@@ -816,7 +831,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                               {/* TEXT INPUT TYPE */}
                               {q.type === 'text' && (
                                 <textarea
-                                  placeholder="Escribe tu respuesta detallada aquí..."
+                                  placeholder={territoryUI?.placeholder || 'Escribe tu respuesta detallada aquí...'}
                                   value={currentVal || ''}
                                   onChange={(e) => handleSetAnswer(q.id, e.target.value)}
                                   rows={3}
@@ -887,7 +902,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                                                 aria-pressed={Array.isArray(currentVal) ? currentVal.some(value => optionMatches(activeSurvey, q, value, opt)) : optionMatches(activeSurvey, q, currentVal, opt)}
                                       type="button"
                                       onClick={() => handleSetAnswer(q.id, opt)}
-                                      className={`py-2.5 px-4 rounded-xl border text-left text-xs font-medium transition-all cursor-pointer flex items-center gap-3 ${
+                                      className={`py-2.5 px-4 rounded-xl border text-start text-xs font-medium transition-all cursor-pointer flex items-center gap-3 ${
                                         optionMatches(activeSurvey, q, currentVal, opt)
                                           ? 'bg-indigo-50 border-indigo-300 text-indigo-800 shadow-xs'
                                           : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -913,7 +928,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                                                 aria-pressed={Array.isArray(currentVal) ? currentVal.some(value => optionMatches(activeSurvey, q, value, opt)) : optionMatches(activeSurvey, q, currentVal, opt)}
                                         type="button"
                                         onClick={() => handleMultipleChoiceToggle(q.id, opt)}
-                                        className={`py-2.5 px-4 rounded-xl border text-left text-xs font-medium transition-all cursor-pointer flex items-center gap-3 ${
+                                        className={`py-2.5 px-4 rounded-xl border text-start text-xs font-medium transition-all cursor-pointer flex items-center gap-3 ${
                                           isSelected
                                             ? 'bg-indigo-50 border-indigo-400 text-indigo-800 shadow-xs'
                                             : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -944,7 +959,7 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                           onClick={() => setActiveSurvey(null)}
                           className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer"
                         >
-                          Cancelar y Volver
+                          {territoryUI?.cancel || 'Cancelar y Volver'}
                         </button>
                         <button
                           type="submit"
@@ -954,11 +969,11 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
                           {submitting ? (
                             <>
                               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              <span>Enviando Encuesta...</span>
+                              <span>{territoryUI?.sending || 'Enviando Encuesta...'}</span>
                             </>
                           ) : (
                             <>
-                              <span>Enviar Encuestas Terminada</span>
+                              <span>{territoryUI?.send || 'Enviar Encuestas Terminada'}</span>
                               <ArrowRight className="w-3.5 h-3.5" />
                             </>
                           )}
@@ -972,6 +987,8 @@ export default function UserDashboard({ surveys, onActiveStateChange }: UserDash
             );
           })()}
         </div>
+        )}
+        </>
       ) : (
         /* LIST OF SURVEYS */
         <div className="space-y-4" id="surveys-gallery">
