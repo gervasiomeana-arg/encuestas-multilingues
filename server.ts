@@ -424,8 +424,8 @@ function escapeHtml(value: string): string {
 }
 
 function replaceMeta(html: string, attribute: "name" | "property", key: string, value: string): string {
-  const tagPattern = new RegExp(\`<meta\\\\s+\${attribute}=["']\${key}["']\\\\s+content=["'][^"']*["'][^>]*>\`, "i");
-  return html.replace(tagPattern, \`<meta \${attribute}="\${key}" content="\${escapeHtml(value)}" />\`);
+  const tagPattern = new RegExp(`<meta\\s+\${attribute}=["']\${key}["']\\s+content=["'][^"']*["'][^>]*>`, "i");
+  return html.replace(tagPattern, `<meta \${attribute}="\${key}" content="\${escapeHtml(value)}" />`);
 }
 
 // Link unfurlers (WhatsApp, Facebook, etc.) read metadata from the first HTML response,
