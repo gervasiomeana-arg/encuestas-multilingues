@@ -372,6 +372,91 @@ app.use('/api', (_req, res) => {
 });
 app.use(apiErrorHandler);
 
+
+type SurveyPreview = { title: string; description: string };
+const PREVIEW_DATABASES = [
+  { project: NEW_FIREBASE_ENV.VITE_NEW_FIREBASE_PROJECT_ID, database: NEW_FIREBASE_ENV.VITE_NEW_FIREBASE_DATABASE_ID, apiKey: NEW_FIREBASE_ENV.VITE_NEW_FIREBASE_API_KEY },
+  { project: "chromatic-pride-0ttsj", database: "ai-studio-f947253c-4469-4545-9268-02ec4d0ccde0", apiKey: "AIzaSyCgxfayQSG0StnO4MDsP_N2VqF9SHZmAuo" }
+];
+
+function firestoreString(value: any): string {
+  return typeof value?.stringValue === "string" ? value.stringValue : "";
+}
+
+function translatedField(fields: any, fieldName: "title" | "description"): string {
+  const translations = fields?.translations?.mapValue?.fields || {};
+  const spanish = translations.es?.mapValue?.fields || {};
+  return firestoreString(spanish[fieldName]) || firestoreString(fields?.[fieldName]);
+}
+
+async function loadSurveyPreview(surveyId: string): Promise<SurveyPreview | null> {
+  for (const database of PREVIEW_DATABASES) {
+    const url = new URL(
+      `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(database.project)}/databases/${encodeURIComponent(database.database)}/documents/surveys/${encodeURIComponent(surveyId)}`
+    );
+    url.searchParams.set("key", database.apiKey);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) continue;
+      const document = await response.json() as { fields?: Record<string, any> };
+      const fields = document.fields || {};
+      const title = translatedField(fields, "title").trim();
+      if (!title) continue;
+      return {
+        title: title.toLocaleUpperCase("es"),
+        description: translatedField(fields, "description").trim()
+      };
+    } catch {
+      // Preview metadata is best-effort; the form remains available if a database is offline.
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  return null;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[character] || character);
+}
+
+function replaceMeta(html: string, attribute: "name" | "property", key: string, value: string): string {
+  const tagPattern = new RegExp(`<meta\\s+${attribute}=["']${key}["']\\s+content=["'][^"']*["']\\s*\\/? >`.replace(" />", "\\s*/?>"), "i");
+  return html.replace(tagPattern, `<meta ${attribute}="${key}" content="${escapeHtml(value)}" />`);
+}
+
+// Link unfurlers (WhatsApp, Facebook, etc.) read metadata from the first HTML response,
+// before the React app runs. Resolve the survey ID on the server so each shared link has
+// its own title and description. This endpoint only reads survey definitions.
+app.get("/", async (req, res, next) => {
+  const rawId = req.query.surveyId || req.query.id;
+  if (typeof rawId !== "string" || !/^[A-Za-z0-9_-]{1,160}$/.test(rawId)) return next();
+
+  const candidates = [
+    path.join(process.cwd(), "dist", "index.html"),
+    path.join(process.cwd(), "dist", "client", "index.html"),
+    path.join(process.cwd(), "index.html")
+  ];
+  let html: string | null = null;
+  for (const candidate of candidates) {
+    try { html = await fs.promises.readFile(candidate, "utf8"); break; } catch { /* Try the next build location. */ }
+  }
+  if (!html) return next();
+
+  const survey = await loadSurveyPreview(rawId);
+  const title = survey?.title || "ENCUESTAS MULTILINGÜES";
+  const description = survey?.description || "Encuestas multilingües para recopilar respuestas de forma segura.";
+  html = html.replace(/<title>[\\s\\S]*?<\\/title>/i, `<title>${escapeHtml(title)}</title>`);
+  html = replaceMeta(html, "name", "description", description);
+  html = replaceMeta(html, "property", "og:title", title);
+  html = replaceMeta(html, "property", "og:description", description);
+  res.setHeader("Cache-Control", "no-store");
+  res.type("html").send(html);
+});
+
 async function startServer() {
   const isDev = process.env.npm_lifecycle_event === "dev" || process.argv.includes("--dev");
   const hasDist = fs.existsSync(path.join(process.cwd(), "dist", "index.html")) ||
