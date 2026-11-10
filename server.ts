@@ -424,8 +424,8 @@ function escapeHtml(value: string): string {
 }
 
 function replaceMeta(html: string, attribute: "name" | "property", key: string, value: string): string {
-  const tagPattern = new RegExp(`<meta\\s+${attribute}=["']${key}["']\\s+content=["'][^"']*["']\\s*\\/? >`.replace(" />", "\\s*/?>"), "i");
-  return html.replace(tagPattern, `<meta ${attribute}="${key}" content="${escapeHtml(value)}" />`);
+  const tagPattern = new RegExp(\`<meta\\\\s+\${attribute}=["']\${key}["']\\\\s+content=["'][^"']*["'][^>]*>\`, "i");
+  return html.replace(tagPattern, \`<meta \${attribute}="\${key}" content="\${escapeHtml(value)}" />\`);
 }
 
 // Link unfurlers (WhatsApp, Facebook, etc.) read metadata from the first HTML response,
@@ -449,7 +449,7 @@ app.get("/", async (req, res, next) => {
   const survey = await loadSurveyPreview(rawId);
   const title = survey?.title || "ENCUESTAS MULTILINGÜES";
   const description = survey?.description || "Encuestas multilingües para recopilar respuestas de forma segura.";
-  html = html.replace(/<title>[\\s\\S]*?<\\/title>/i, `<title>${escapeHtml(title)}</title>`);
+  html = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtml(title)}</title>`);
   html = replaceMeta(html, "name", "description", description);
   html = replaceMeta(html, "property", "og:title", title);
   html = replaceMeta(html, "property", "og:description", description);
